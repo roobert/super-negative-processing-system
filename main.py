@@ -9,6 +9,7 @@ import os
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
 
 import sys
+import argparse
 import math
 import hashlib
 import cv2
@@ -2083,7 +2084,38 @@ class NegativeDetectorGUI(QMainWindow):
         event.accept()
 
 
+# Supported image extensions (RAW formats + common image formats)
+IMAGE_EXTENSIONS = RAW_EXTENSIONS | {'.png', '.jpg', '.jpeg', '.tif', '.tiff'}
+
+
+def expand_paths(paths: list[str], recursive: bool = False) -> list[str]:
+    """Expand paths to list of image files.
+
+    - Regular files are included if they have a supported extension
+    - Directories are expanded to their image files (recursively if recursive=True)
+    """
+    result = []
+    for path in paths:
+        p = Path(path)
+        if p.is_file():
+            if p.suffix.lower() in IMAGE_EXTENSIONS:
+                result.append(str(p))
+        elif p.is_dir():
+            pattern = '**/*' if recursive else '*'
+            for child in sorted(p.glob(pattern)):
+                if child.is_file() and child.suffix.lower() in IMAGE_EXTENSIONS:
+                    result.append(str(child))
+    return result
+
+
 def main():
+    # Parse arguments before QApplication consumes sys.argv
+    parser = argparse.ArgumentParser(description='Super Negative Processing System')
+    parser.add_argument('-r', '--recursive', action='store_true',
+                        help='Recursively load images from directories')
+    parser.add_argument('paths', nargs='*', help='Image files or directories to load')
+    args = parser.parse_args()
+
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
 
@@ -2107,9 +2139,10 @@ def main():
     window.show()
 
     # Load files from command line
-    if len(sys.argv) > 1:
-        files = sys.argv[1:]
-        window.set_file_list(files)
+    if args.paths:
+        files = expand_paths(args.paths, recursive=args.recursive)
+        if files:
+            window.set_file_list(files)
 
     sys.exit(app.exec())
 
