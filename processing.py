@@ -1,15 +1,13 @@
-#!/usr/bin/env python3
 """
-SUPER NEGATIVE PROCESSING SYSTEM - Frame Detector
+SUPER NEGATIVE PROCESSING SYSTEM - Image Processing Core
 
-Detects and extracts frame boundaries from scanned film negatives.
-Handles low contrast between film base and frame content, and rotated frames.
+Frame detection, negative inversion, and image processing functions.
+Handles RAW formats, film base color sampling, and frame extraction.
 """
 
 import cv2
 import numpy as np
 from pathlib import Path
-import argparse
 import hashlib
 from scipy import optimize
 
@@ -1026,36 +1024,3 @@ def process_negative(input_path: str, output_dir: str = None,
         "extracted": extracted,
         "base_color_bgr": base_color_bgr,
     }
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Detect and extract frames from film negatives")
-    parser.add_argument("input", help="Input image path or directory")
-    parser.add_argument("-o", "--output", help="Output directory", default=None)
-    parser.add_argument("-t", "--threshold", type=float, default=20.0,
-                        help="Color distance threshold for content detection (default: 20.0)")
-    parser.add_argument("--no-debug", action="store_true", help="Disable debug outputs")
-
-    args = parser.parse_args()
-
-    input_path = Path(args.input)
-
-    if input_path.is_file():
-        process_negative(str(input_path), args.output, args.threshold, debug=not args.no_debug)
-    elif input_path.is_dir():
-        # Process all images in directory
-        for ext in ["*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff"]:
-            for img_path in input_path.glob(ext):
-                try:
-                    process_negative(str(img_path), args.output, args.threshold, debug=not args.no_debug)
-                except Exception as e:
-                    print(f"  ERROR processing {img_path.name}: {e}")
-    else:
-        print(f"Error: {input_path} not found")
-        return 1
-
-    return 0
-
-
-if __name__ == "__main__":
-    exit(main())

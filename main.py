@@ -26,7 +26,7 @@ from PySide6.QtGui import QImage, QPixmap, QAction, QKeySequence, QPalette, QCol
 
 import presets
 import storage
-from detect_frame import load_image, RAW_EXTENSIONS
+from processing import load_image, RAW_EXTENSIONS
 from auto_rotate import detect_auto_rotation, RotationConfidence
 
 
@@ -650,7 +650,7 @@ class ThumbnailLoaderWorker(QObject):
         self._cancelled = True
 
     def run(self):
-        from detect_frame import RAW_EXTENSIONS, process_negative_image
+        from processing import RAW_EXTENSIONS, process_negative_image
 
         for index, path, image_hash in self._items:
             if self._cancelled:
@@ -8978,9 +8978,9 @@ class NegativeDetectorGUI(QMainWindow):
     def _invert_negative(self, img: np.ndarray, base_color: np.ndarray) -> np.ndarray:
         """
         Invert a color negative using the base (orange mask) color.
-        Delegates to detect_frame.invert_negative for the actual implementation.
+        Delegates to processing.invert_negative for the actual implementation.
         """
-        from detect_frame import invert_negative
+        from processing import invert_negative
         return invert_negative(img, base_color)
 
     def _export_frame(self):

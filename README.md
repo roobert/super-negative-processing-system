@@ -95,16 +95,8 @@ pip install -r requirements.txt
 
 ## Usage
 
-### GUI Application
-
 ```bash
-python gui.py [image_path_or_directory]
-```
-
-### Command Line
-
-```bash
-python detect_frame.py <input_image> [options]
+python main.py [image_path_or_directory]
 ```
 
 ## Keyboard Shortcuts
@@ -121,8 +113,8 @@ python detect_frame.py <input_image> [options]
 ## Architecture
 
 ```
-gui.py              - PySide6 GUI application (main entry point)
-detect_frame.py     - Frame detection and image processing core
+main.py             - PySide6 GUI application (main entry point)
+processing.py       - Frame detection and image processing core
 auto_rotate.py      - Multi-method automatic rotation detection
 presets.py          - Film stock preset definitions
 storage.py          - SQLite persistence and caching
