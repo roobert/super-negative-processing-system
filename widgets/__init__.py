@@ -17,6 +17,7 @@ from widgets.dialogs import (
     KeybindingsDialog,
     SettingsDialog,
     SavePresetDialog,
+    BatchProgressDialog,
 )
 
 # Thumbnail bar
@@ -68,6 +69,7 @@ __all__ = [
     'KeybindingsDialog',
     'SettingsDialog',
     'SavePresetDialog',
+    'BatchProgressDialog',
     # Thumbnail bar
     'ThumbnailLoaderWorker',
     'ThumbnailItem',

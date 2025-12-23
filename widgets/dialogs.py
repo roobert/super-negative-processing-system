@@ -7,9 +7,11 @@ Modal dialogs for settings and keyboard shortcuts help.
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QComboBox, QDialogButtonBox, QCheckBox, QPushButton, QWidget,
-    QLineEdit, QTextEdit
+    QLineEdit, QTextEdit, QProgressBar
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+from pathlib import Path
+import time
 
 from state import TransformState
 import storage
@@ -423,3 +425,151 @@ class SettingsDialog(QDialog):
         )
 
         self.accept()
+
+
+class BatchProgressDialog(QDialog):
+    """Modal progress dialog for batch operations with cancel support."""
+
+    cancelled = Signal()
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(450)
+        self.setModal(True)
+        # Disable close button - must use Cancel
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)
+
+        self._start_time = None
+        self._processed_count = 0
+        self._is_finished = False
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Status label
+        self._status_label = QLabel("Initializing...")
+        self._status_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+        layout.addWidget(self._status_label)
+
+        # Progress bar
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setTextVisible(True)
+        layout.addWidget(self._progress_bar)
+
+        # Details row
+        details_layout = QHBoxLayout()
+
+        self._item_label = QLabel("")
+        self._item_label.setStyleSheet("color: #888; font-size: 11px;")
+        details_layout.addWidget(self._item_label, 1)
+
+        self._eta_label = QLabel("")
+        self._eta_label.setStyleSheet("color: #888; font-size: 11px;")
+        details_layout.addWidget(self._eta_label)
+
+        layout.addLayout(details_layout)
+
+        # Worker info
+        self._worker_label = QLabel("")
+        self._worker_label.setStyleSheet("color: #666; font-size: 10px;")
+        layout.addWidget(self._worker_label)
+
+        # Spacer
+        layout.addStretch()
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setFixedWidth(100)
+        self._cancel_btn.clicked.connect(self._on_cancel)
+        btn_layout.addWidget(self._cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    def set_worker_info(self, worker_count: int, memory_gb: float):
+        """Display worker configuration info."""
+        self._worker_label.setText(
+            f"Using {worker_count} CPU workers  |  {memory_gb:.1f} GB available"
+        )
+
+    def set_progress(self, current: int, total: int, message: str = ""):
+        """Update progress display."""
+        if self._start_time is None:
+            self._start_time = time.time()
+
+        self._processed_count = current
+
+        # Update progress bar
+        self._progress_bar.setMaximum(total)
+        self._progress_bar.setValue(current)
+        self._status_label.setText(f"Processing {current} of {total}...")
+
+        # Show current item (just filename)
+        if message:
+            filename = Path(message).name if "/" in message or "\\" in message else message
+            self._item_label.setText(filename)
+
+        # Calculate ETA
+        if current > 0 and not self._is_finished:
+            elapsed = time.time() - self._start_time
+            rate = current / elapsed
+            if rate > 0:
+                remaining = (total - current) / rate
+                if remaining < 60:
+                    self._eta_label.setText(f"~{int(remaining)}s remaining")
+                else:
+                    minutes = int(remaining / 60)
+                    self._eta_label.setText(f"~{minutes}m remaining")
+            else:
+                self._eta_label.setText("")
+
+    def set_finished(self, success_count: int, total: int):
+        """Show completion status and change button to Close."""
+        self._is_finished = True
+
+        if success_count == total:
+            self._status_label.setText(f"Complete: {success_count} images processed")
+        else:
+            failed = total - success_count
+            self._status_label.setText(
+                f"Complete: {success_count} processed, {failed} failed"
+            )
+
+        self._progress_bar.setValue(total)
+        self._item_label.setText("")
+        self._eta_label.setText("")
+
+        # Calculate total time
+        if self._start_time:
+            elapsed = time.time() - self._start_time
+            if elapsed < 60:
+                self._worker_label.setText(f"Completed in {elapsed:.1f} seconds")
+            else:
+                minutes = int(elapsed / 60)
+                seconds = int(elapsed % 60)
+                self._worker_label.setText(f"Completed in {minutes}m {seconds}s")
+
+        # Change button to Close
+        self._cancel_btn.setText("Close")
+        self._cancel_btn.clicked.disconnect()
+        self._cancel_btn.clicked.connect(self.accept)
+
+    def _on_cancel(self):
+        """Handle cancel button click."""
+        self._cancel_btn.setEnabled(False)
+        self._status_label.setText("Cancelling...")
+        self.cancelled.emit()
+
+    def closeEvent(self, event):
+        """Handle window close - emit cancel if not finished."""
+        if not self._is_finished:
+            self.cancelled.emit()
+        super().closeEvent(event)

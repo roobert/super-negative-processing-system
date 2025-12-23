@@ -43,6 +43,7 @@ from widgets import (
     # Dialogs
     KeybindingsDialog,
     SettingsDialog,
+    BatchProgressDialog,
     # Thumbnail bar
     ThumbnailLoaderWorker,
     ThumbnailItem,
@@ -67,6 +68,10 @@ from widgets import (
     CollapsibleDebugPanel,
     CollapsibleControlsPanel,
 )
+
+# Import processing services
+from services import ProcessingService
+from workers import HashService
 
 
 class ShortcutsOverlay(QWidget):
@@ -225,6 +230,11 @@ class NegativeDetectorGUI(QMainWindow):
         self._current_hash = None
         self._storage = storage.get_storage()
         self._file_hashes = {}  # Cache of path -> hash
+
+        # Background processing services
+        self._processing_service = ProcessingService(self)
+        self._hash_service = HashService(self)
+        self._hash_service.hashComputed.connect(self._on_hash_computed)
 
         # Shared transform state between Detection and Development views
         self._transform_state = TransformState()
@@ -1089,6 +1099,8 @@ class NegativeDetectorGUI(QMainWindow):
             hashes = [self._file_hashes.get(p) for p in self.file_list]
             self.thumbnail_bar.set_files(self.file_list, hashes)
             self._load_current_file()
+            # Start background auto-processing for all images
+            self._start_batch_auto_process()
 
     def _load_image_from_path(self, path: str):
         """Load a single image (adds to file list if not already there)."""
@@ -1098,6 +1110,8 @@ class NegativeDetectorGUI(QMainWindow):
             self._compute_file_hashes()
             hashes = [self._file_hashes.get(p) for p in self.file_list]
             self.thumbnail_bar.set_files(self.file_list, hashes)
+            # Start background auto-processing
+            self._start_batch_auto_process()
         self._load_current_file()
 
     def set_file_list(self, paths: list):
@@ -1110,6 +1124,8 @@ class NegativeDetectorGUI(QMainWindow):
             hashes = [self._file_hashes.get(p) for p in self.file_list]
             self.thumbnail_bar.set_files(valid_paths, hashes)
             self._load_current_file()
+            # Start background auto-processing for all images
+            self._start_batch_auto_process()
 
     def _compute_file_hashes(self):
         """Compute and cache hashes for all files in file_list."""
@@ -1196,6 +1212,14 @@ class NegativeDetectorGUI(QMainWindow):
             for chunk in iter(lambda: f.read(65536), b''):
                 hasher.update(chunk)
         return hasher.hexdigest()
+
+    def _on_hash_computed(self, path: str, file_hash: str):
+        """Handle hash computed in background."""
+        self._file_hashes[path] = file_hash
+        # Update thumbnail bar with the new hash
+        if path in self.file_list:
+            index = self.file_list.index(path)
+            self.thumbnail_bar.update_hash(index, file_hash)
 
     def _save_current_settings(self):
         """Save settings and thumbnail for current image to SQLite."""
@@ -1300,15 +1324,13 @@ class NegativeDetectorGUI(QMainWindow):
             self._update_crop_reset_button_styles()
 
     def _on_apply_preset_to_all(self, preset_key: str):
-        """Apply a preset to all loaded images."""
+        """Apply a preset to all loaded images with background processing."""
         if not self.file_list:
             return
 
-        # Get preset display name
+        # Get preset info
         preset_info = presets.get_preset(preset_key)
         preset_name = preset_info.get('name', preset_key)
-
-        # Count images that will be affected
         image_count = len(self.file_list)
 
         # Ask for confirmation
@@ -1316,8 +1338,7 @@ class NegativeDetectorGUI(QMainWindow):
             self,
             "Apply Preset to All Images",
             f"Apply '{preset_name}' to all {image_count} loaded images?\n\n"
-            "This will set the active preset for each image. "
-            "Any per-image customizations will be preserved.",
+            "This will process each image and regenerate thumbnails with the preset applied.",
             QMessageBox.Yes | QMessageBox.Cancel,
             QMessageBox.Cancel
         )
@@ -1328,38 +1349,76 @@ class NegativeDetectorGUI(QMainWindow):
         # Save current image settings first
         self._save_current_settings()
 
-        # Apply preset to all images
-        applied_count = 0
-        for path in self.file_list:
-            image_hash = self._file_hashes.get(path)
-            if not image_hash:
-                continue
+        # Store preset info for the batch handlers
+        self._batch_preset_key = preset_key
+        self._batch_preset_name = preset_name
 
-            # Load existing settings or create defaults
-            existing_settings = self._storage.load_settings(image_hash)
-            if existing_settings:
-                # Update the preset state while preserving other settings
-                preset_state = existing_settings.get('preset_state', {'active_preset': 'none', 'preset_states': {}})
-                preset_state['active_preset'] = preset_key
-                existing_settings['preset_state'] = preset_state
-                self._storage.save_settings(image_hash, existing_settings)
-            else:
-                # Create minimal settings with just the preset
-                new_settings = {
-                    'preset_state': {
-                        'active_preset': preset_key,
-                        'preset_states': {}
-                    }
-                }
-                self._storage.save_settings(image_hash, new_settings)
+        # Create progress dialog
+        dialog = BatchProgressDialog(f"Applying '{preset_name}'", self)
+        dialog.set_worker_info(
+            self._processing_service.get_worker_count(),
+            self._processing_service.get_available_memory_gb()
+        )
 
-            # Update in-memory cache if present
-            if path in self.image_settings:
+        # Prepare items for batch processing
+        items = [
+            (i, path, self._file_hashes.get(path, ""))
+            for i, path in enumerate(self.file_list)
+        ]
+
+        # Connect signals for this batch operation
+        self._processing_service.progressUpdated.connect(dialog.set_progress)
+        self._processing_service.imageProcessed.connect(self._on_batch_preset_image_processed)
+        self._processing_service.batchCompleted.connect(
+            lambda s, t: self._on_batch_preset_completed(s, t, dialog)
+        )
+        self._processing_service.errorOccurred.connect(
+            lambda idx, err: print(f"[Batch] Error on image {idx}: {err}")
+        )
+        dialog.cancelled.connect(self._processing_service.cancel)
+
+        # Start batch processing
+        self._processing_service.apply_preset_to_all(items, preset_info, preset_key)
+
+        # Show modal dialog (blocks until processing completes or cancelled)
+        dialog.open()
+
+        # Note: Dialog will close when batch completes via set_finished()
+
+    def _on_batch_preset_image_processed(self, index: int, result: dict):
+        """Handle individual image completion during batch preset application."""
+        # Update thumbnail with the processed result
+        if 'thumbnail' in result:
+            self.thumbnail_bar.update_thumbnail(index, result['thumbnail'])
+
+        # Update settings in storage
+        image_hash = result.get('image_hash')
+        if image_hash:
+            existing_settings = self._storage.load_settings(image_hash) or {}
+            preset_state = existing_settings.get('preset_state', {'active_preset': 'none', 'preset_states': {}})
+            preset_state['active_preset'] = self._batch_preset_key
+            existing_settings['preset_state'] = preset_state
+            self._storage.save_settings(image_hash, existing_settings)
+
+            # Update in-memory cache
+            path = result.get('path')
+            if path and path in self.image_settings:
                 if 'preset_state' not in self.image_settings[path]:
                     self.image_settings[path]['preset_state'] = {'active_preset': 'none', 'preset_states': {}}
-                self.image_settings[path]['preset_state']['active_preset'] = preset_key
+                self.image_settings[path]['preset_state']['active_preset'] = self._batch_preset_key
 
-            applied_count += 1
+    def _on_batch_preset_completed(self, success_count: int, total: int, dialog):
+        """Handle batch preset completion."""
+        dialog.set_finished(success_count, total)
+
+        # Disconnect signals
+        try:
+            self._processing_service.progressUpdated.disconnect()
+            self._processing_service.imageProcessed.disconnect()
+            self._processing_service.batchCompleted.disconnect()
+            self._processing_service.errorOccurred.disconnect()
+        except RuntimeError:
+            pass
 
         # Reload current image to reflect changes
         if self.current_path:
@@ -1368,8 +1427,182 @@ class NegativeDetectorGUI(QMainWindow):
 
         # Show confirmation flash
         self.adjustments_view._preview.flash_preset_name(
-            f"Applied '{preset_name}' to {applied_count} images"
+            f"Applied '{self._batch_preset_name}' to {success_count} images"
         )
+
+    # ------------------------------------------------------------------
+    # Background auto-processing (runs automatically after file loading)
+    # ------------------------------------------------------------------
+
+    def _start_batch_auto_process(self):
+        """Start background auto-processing for all loaded images.
+
+        This runs automatically after files are loaded. It performs:
+        - Frame detection (crop)
+        - Auto-rotation detection (0/90/180/270)
+        - Base color sampling
+        - Negative inversion
+
+        Results are saved to storage and thumbnails are updated progressively.
+        """
+        if not self.file_list:
+            return
+
+        # Don't start if already processing
+        if self._processing_service.is_running:
+            return
+
+        # Prepare items for batch processing
+        items = [
+            (i, path, self._file_hashes.get(path, ""))
+            for i, path in enumerate(self.file_list)
+        ]
+
+        # Filter out images that already have cached settings and thumbnails
+        items_to_process = []
+        for i, path, hash_ in items:
+            if hash_:
+                # Check if we already have settings for this image
+                existing_settings = self._storage.load_settings(hash_)
+                cached_thumb = self._storage.load_thumbnail(hash_)
+                if existing_settings and cached_thumb is not None:
+                    # Already processed, update thumbnail from cache
+                    self.thumbnail_bar.update_thumbnail(i, cached_thumb)
+                    continue
+            items_to_process.append((i, path, hash_))
+
+        if not items_to_process:
+            # All images already cached, nothing to do
+            return
+
+        # Connect signals for this batch operation (using weak connections)
+        self._processing_service.progressUpdated.connect(self._on_auto_process_progress)
+        self._processing_service.imageProcessed.connect(self._on_auto_process_image_processed)
+        self._processing_service.batchCompleted.connect(self._on_auto_process_completed)
+        self._processing_service.errorOccurred.connect(
+            lambda idx, err: print(f"[AutoProcess] Error on image {idx}: {err}")
+        )
+
+        # Get settings from UI
+        bg_threshold = self.bg_slider.value()
+        sensitivity = self.sensitivity_slider.value()
+
+        # Start batch processing in background
+        self._processing_service.auto_process_all(items_to_process, bg_threshold, sensitivity)
+
+    def _on_auto_process_progress(self, current: int, total: int, message: str):
+        """Handle progress updates during auto-processing."""
+        # Update status bar with progress (silent background operation)
+        pass  # Could add status bar text here if desired
+
+    def _on_auto_process_image_processed(self, index: int, result: dict):
+        """Handle individual image completion during auto-processing.
+
+        Updates the thumbnail and saves detected settings to storage.
+        """
+        # Update thumbnail with the processed result
+        if 'thumbnail' in result:
+            self.thumbnail_bar.update_thumbnail(index, result['thumbnail'])
+
+        # Save detected settings to storage
+        image_hash = result.get('image_hash')
+        path = result.get('path')
+
+        if image_hash:
+            # Build settings dict from detected values
+            # Note: fine_rotation is a MANUAL adjustment, not the auto-detected angle.
+            # The main app auto-detects the frame angle in _auto_crop_rotate() each time.
+            # The worker's detected angle is only used for generating the thumbnail.
+            settings = {
+                'bg': result.get('bg_threshold', self.bg_slider.default),
+                'sensitivity': result.get('sensitivity', self.sensitivity_slider.default),
+                'fine_rotation': 0.0,  # Manual adjustment, starts at 0
+                'rotation': result.get('rotation', 0),
+                'rotation_confidence': result.get('rotation_confidence', 'NONE'),
+                'rotation_method': result.get('rotation_method', 'none'),
+                'base_color': result.get('base_color', [1.0, 0.5, 0.3]),
+                'crop_adjustment': {'left': 0, 'top': 0, 'right': 0, 'bottom': 0},
+                'base_pos': None,
+                'preset_state': {'active_preset': 'none', 'preset_states': {}},
+            }
+
+            # Save settings and thumbnail
+            inverted = result.get('inverted')
+            if inverted is not None:
+                self._storage.save_all(image_hash, settings, inverted)
+            else:
+                self._storage.save_settings(image_hash, settings)
+
+            # Update in-memory cache
+            if path:
+                self.image_settings[path] = settings
+
+            # Update thumbnail bar with the hash (for favorites lookup)
+            self.thumbnail_bar.update_hash(index, image_hash)
+
+            # If this is the currently displayed image, refresh the view with new settings
+            if path == self.current_path:
+                # Update UI with detected settings (without triggering reprocessing yet)
+                self.bg_slider.blockSignals(True)
+                self.sensitivity_slider.blockSignals(True)
+
+                self.bg_slider.setValue(settings.get('bg', self.bg_slider.default))
+                self.sensitivity_slider.setValue(settings.get('sensitivity', self.sensitivity_slider.default))
+
+                self.bg_slider.blockSignals(False)
+                self.sensitivity_slider.blockSignals(False)
+
+                # Note: fine_rotation is a manual adjustment - don't change it here.
+                # The main app auto-detects the frame angle in _auto_crop_rotate().
+
+                # Update 90° rotation state if detected
+                rotation = settings.get('rotation', 0)
+                if rotation != self.current_rotation:
+                    self.current_rotation = rotation
+                    self._transform_state._rotation = rotation
+                    self.current_image = self._apply_rotation(self.current_image_original, rotation)
+                    self._update_rotation_reset_button_styles()
+
+                # Reprocess with the new auto-detected settings
+                self._process_full()
+
+    def _on_auto_process_completed(self, success_count: int, total: int):
+        """Handle auto-processing batch completion."""
+        print(f"[AutoProcess] Completed: {success_count}/{total} images processed")
+
+        # Disconnect signals
+        try:
+            self._processing_service.progressUpdated.disconnect(self._on_auto_process_progress)
+            self._processing_service.imageProcessed.disconnect(self._on_auto_process_image_processed)
+            self._processing_service.batchCompleted.disconnect(self._on_auto_process_completed)
+            self._processing_service.errorOccurred.disconnect()
+        except RuntimeError:
+            pass
+
+        # Reload current image if settings were updated
+        if self.current_path and self._current_hash:
+            new_settings = self._storage.load_settings(self._current_hash)
+            if new_settings:
+                # Update UI with detected settings (without triggering reprocessing)
+                self.bg_slider.blockSignals(True)
+                self.sensitivity_slider.blockSignals(True)
+
+                self.bg_slider.setValue(new_settings.get('bg', self.bg_slider.default))
+                self.sensitivity_slider.setValue(new_settings.get('sensitivity', self.sensitivity_slider.default))
+
+                self.bg_slider.blockSignals(False)
+                self.sensitivity_slider.blockSignals(False)
+
+                # Update rotation state
+                rotation = new_settings.get('rotation', 0)
+                if rotation != self.current_rotation:
+                    self.current_rotation = rotation
+                    self._transform_state._rotation = rotation
+                    self.current_image = self._apply_rotation(self.current_image_original, rotation)
+                    self._update_rotation_reset_button_styles()
+
+                # Reprocess with new settings
+                self._process_full()
 
     def _on_thumbnail_selected(self, index: int):
         """Handle thumbnail click."""

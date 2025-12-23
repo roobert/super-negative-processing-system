@@ -20,7 +20,18 @@ from ui_constants import Colors, Styles
 
 
 class ThumbnailLoaderWorker(QObject):
-    """Background worker for loading thumbnails."""
+    """Background worker for loading cached thumbnails.
+
+    This worker only loads thumbnails from the cache. Actual image processing
+    is handled by ProcessingService using ProcessPoolExecutor for parallel
+    multi-CPU processing with auto-rotation detection.
+
+    The batch processing system (_start_batch_auto_process) handles:
+    - Frame detection (crop)
+    - Auto-rotation (0/90/180/270)
+    - Base color sampling
+    - Negative inversion
+    """
     thumbnailLoaded = Signal(int, object)  # index, numpy array or None
     finished = Signal()
 
@@ -34,22 +45,18 @@ class ThumbnailLoaderWorker(QObject):
         self._cancelled = True
 
     def run(self):
-        from processing import RAW_EXTENSIONS, process_negative_image
-
+        """Load cached thumbnails only. Processing is deferred to batch system."""
         for index, path, image_hash in self._items:
             if self._cancelled:
                 break
 
-            img = None
-            is_raw = Path(path).suffix.lower() in RAW_EXTENSIONS
-
-            # Try cached thumbnail first for display (already processed from previous session)
+            # Only load from cache - batch processing handles new images
             if image_hash:
                 cached = storage.get_storage().load_thumbnail(image_hash)
                 if cached is not None:
                     self.thumbnailLoaded.emit(index, cached)
-                    # For RAW files, ensure demosaiced cache is warmed even if thumbnail exists
-                    # This way navigation to this image will be instant
+                    # For RAW files, warm the demosaiced cache for faster navigation
+                    is_raw = Path(path).suffix.lower() in RAW_EXTENSIONS
                     if is_raw and not storage.get_storage().has_raw_cache(image_hash):
                         try:
                             load_image(path)  # Triggers demosaic + cache
@@ -57,14 +64,9 @@ class ThumbnailLoaderWorker(QObject):
                             pass
                     continue
 
-            # Load full image (demosaics RAW if needed, caches result)
-            try:
-                img = load_image(path)
-                # Run full processing pipeline: crop, rotate, invert
-                processed = process_negative_image(img)
-                self.thumbnailLoaded.emit(index, processed)
-            except (FileNotFoundError, ImportError):
-                self.thumbnailLoaded.emit(index, None)
+            # No cache - emit None to show placeholder
+            # The batch processing system will update with processed thumbnail
+            self.thumbnailLoaded.emit(index, None)
 
         self.finished.emit()
 
@@ -389,3 +391,11 @@ class ThumbnailBar(QWidget):
         """Update a specific thumbnail with a new image from processing."""
         if 0 <= index < len(self.thumbnails):
             self.thumbnails[index].set_image(img, from_processing=True)
+
+    def update_hash(self, index: int, image_hash: str):
+        """Update the hash for a thumbnail (enables cache lookup for progressive loading)."""
+        if 0 <= index < len(self.thumbnails):
+            self.thumbnails[index].image_hash = image_hash
+            # Check if this hash is a favorite
+            if image_hash and image_hash in self._favorite_hashes:
+                self.thumbnails[index].set_favorite(True)
