@@ -278,6 +278,80 @@ class NegativeDetectorGUI(QMainWindow):
             }
         """)
         tab_row_layout.addWidget(self.tab_bar)
+
+        # Mode buttons for Development tab (Simple / Lab / Pro)
+        self._mode_button_container = QWidget()
+        mode_layout = QHBoxLayout(self._mode_button_container)
+        mode_layout.setContentsMargins(16, 0, 0, 0)
+        mode_layout.setSpacing(2)
+
+        mode_btn_style = """
+            QPushButton {
+                padding: 4px 12px;
+                border: none;
+                background: #2a2a2a;
+                color: #888;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: #333;
+                color: #ccc;
+            }
+            QPushButton:checked {
+                background: #3a3a3a;
+                color: #fff;
+                border-bottom: 2px solid #e67e22;
+            }
+        """
+
+        self._mode_preview_btn = QPushButton("Preview")
+        self._mode_preview_btn.setCheckable(True)
+        self._mode_preview_btn.setToolTip("Image only - distraction-free viewing")
+        self._mode_preview_btn.setStyleSheet(mode_btn_style)
+        self._mode_preview_btn.clicked.connect(self._set_mode_preview)
+        mode_layout.addWidget(self._mode_preview_btn)
+
+        self._mode_rapid_btn = QPushButton("Rapid")
+        self._mode_rapid_btn.setCheckable(True)
+        self._mode_rapid_btn.setToolTip("Preset grid only - rapid comparison")
+        self._mode_rapid_btn.setStyleSheet(mode_btn_style)
+        self._mode_rapid_btn.clicked.connect(self._set_mode_rapid)
+        mode_layout.addWidget(self._mode_rapid_btn)
+
+        self._mode_rapid_lab_btn = QPushButton("Rapid Lab")
+        self._mode_rapid_lab_btn.setCheckable(True)
+        self._mode_rapid_lab_btn.setToolTip("Preset grid + adjustments")
+        self._mode_rapid_lab_btn.setStyleSheet(mode_btn_style)
+        self._mode_rapid_lab_btn.clicked.connect(self._set_mode_rapid_lab)
+        mode_layout.addWidget(self._mode_rapid_lab_btn)
+
+        self._mode_lab_btn = QPushButton("Lab")
+        self._mode_lab_btn.setCheckable(True)
+        self._mode_lab_btn.setToolTip("Preset list + adjustments - standard workspace")
+        self._mode_lab_btn.setStyleSheet(mode_btn_style)
+        self._mode_lab_btn.clicked.connect(self._set_mode_lab)
+        mode_layout.addWidget(self._mode_lab_btn)
+
+        self._mode_pro_btn = QPushButton("Pro")
+        self._mode_pro_btn.setCheckable(True)
+        self._mode_pro_btn.setToolTip("Adjustments only - focused editing")
+        self._mode_pro_btn.setStyleSheet(mode_btn_style)
+        self._mode_pro_btn.clicked.connect(self._set_mode_pro)
+        mode_layout.addWidget(self._mode_pro_btn)
+
+        # Button group for exclusive selection
+        self._mode_button_group = QButtonGroup(self)
+        self._mode_button_group.setExclusive(False)  # Allow no selection
+        self._mode_button_group.addButton(self._mode_preview_btn, 0)
+        self._mode_button_group.addButton(self._mode_rapid_btn, 1)
+        self._mode_button_group.addButton(self._mode_rapid_lab_btn, 2)
+        self._mode_button_group.addButton(self._mode_lab_btn, 3)
+        self._mode_button_group.addButton(self._mode_pro_btn, 4)
+
+        tab_row_layout.addWidget(self._mode_button_container)
+        # Initially hidden until Development tab is selected
+        self._mode_button_container.setVisible(self.tab_bar.currentIndex() == 1)
+
         tab_row_layout.addStretch()
 
         # Common style for toolbar buttons
@@ -431,6 +505,15 @@ class NegativeDetectorGUI(QMainWindow):
             event.accept()
             return
 
+        # M to cycle through modes (Quick → Lab → Pro), Shift+M to cycle back
+        if event.key() == Qt.Key_M and self.view_stack.currentIndex() == 1:
+            if event.modifiers() == Qt.ShiftModifier:
+                self._cycle_mode_backward()
+            else:
+                self._cycle_mode_forward()
+            event.accept()
+            return
+
         # Q/A W/S E/D for R/G/B white balance adjustment, Shift to reset
         wb_step = 0.05
         if event.key() == Qt.Key_Q and not event.modifiers():
@@ -511,8 +594,127 @@ class NegativeDetectorGUI(QMainWindow):
         self.view_stack.setCurrentIndex(index)
         # Save last opened tab for "remember last" setting
         self._storage.set_last_opened_tab(index)
+        # Show/hide mode buttons based on tab
+        self._mode_button_container.setVisible(index == 1)
         if index == 1:  # Adjustments view
             self._update_adjustments_preview()
+
+    def _uncheck_all_modes(self):
+        """Uncheck all mode buttons."""
+        self._mode_preview_btn.setChecked(False)
+        self._mode_rapid_btn.setChecked(False)
+        self._mode_rapid_lab_btn.setChecked(False)
+        self._mode_lab_btn.setChecked(False)
+        self._mode_pro_btn.setChecked(False)
+
+    def _set_mode_preview(self):
+        """Set Preview mode: image only, all panels collapsed."""
+        self._uncheck_all_modes()
+        self._mode_preview_btn.setChecked(True)
+
+        # Collapse preset panel
+        if self.adjustments_view._preset_panel.is_expanded():
+            self.adjustments_view._preset_panel._collapse()
+
+        # Collapse adjustments panel
+        if self.adjustments_view._adjustments_panel.is_expanded():
+            self.adjustments_view._adjustments_panel._collapse()
+
+    def _set_mode_rapid(self):
+        """Set Rapid mode: preset grid only for rapid comparison."""
+        self._uncheck_all_modes()
+        self._mode_rapid_btn.setChecked(True)
+
+        # Expand preset panel in grid (full) mode
+        if not self.adjustments_view._preset_panel.is_full():
+            self.adjustments_view._preset_panel._expand_full()
+
+        # Collapse adjustments panel
+        if self.adjustments_view._adjustments_panel.is_expanded():
+            self.adjustments_view._adjustments_panel._collapse()
+
+    def _set_mode_rapid_lab(self):
+        """Set Rapid Lab mode: preset grid + adjustments panel."""
+        self._uncheck_all_modes()
+        self._mode_rapid_lab_btn.setChecked(True)
+
+        # Expand preset panel in grid (full) mode
+        if not self.adjustments_view._preset_panel.is_full():
+            self.adjustments_view._preset_panel._expand_full()
+
+        # Expand adjustments panel
+        if not self.adjustments_view._adjustments_panel.is_expanded():
+            self.adjustments_view._adjustments_panel._expand()
+
+    def _set_mode_lab(self):
+        """Set Lab mode: preset list + adjustments panel."""
+        self._uncheck_all_modes()
+        self._mode_lab_btn.setChecked(True)
+
+        # Expand preset panel in normal list mode (not grid)
+        preset_panel = self.adjustments_view._preset_panel
+        if preset_panel.is_full():
+            preset_panel._collapse()
+        if not preset_panel.is_expanded():
+            preset_panel._expand_normal()
+
+        # Expand adjustments panel
+        if not self.adjustments_view._adjustments_panel.is_expanded():
+            self.adjustments_view._adjustments_panel._expand()
+
+    def _set_mode_pro(self):
+        """Set Pro mode: adjustments panel only for focused editing."""
+        self._uncheck_all_modes()
+        self._mode_pro_btn.setChecked(True)
+
+        # Collapse preset panel
+        if self.adjustments_view._preset_panel.is_expanded():
+            self.adjustments_view._preset_panel._collapse()
+
+        # Expand adjustments panel
+        if not self.adjustments_view._adjustments_panel.is_expanded():
+            self.adjustments_view._adjustments_panel._expand()
+
+    def _get_current_mode(self) -> int:
+        """Get current mode index: 0=Preview, 1=Rapid, 2=RapidLab, 3=Lab, 4=Pro, -1=none."""
+        if self._mode_preview_btn.isChecked():
+            return 0
+        elif self._mode_rapid_btn.isChecked():
+            return 1
+        elif self._mode_rapid_lab_btn.isChecked():
+            return 2
+        elif self._mode_lab_btn.isChecked():
+            return 3
+        elif self._mode_pro_btn.isChecked():
+            return 4
+        return -1
+
+    def _cycle_mode_forward(self):
+        """Cycle to next mode: Preview → Rapid → Rapid Lab → Lab → Pro → Preview."""
+        current = self._get_current_mode()
+        next_mode = (current + 1) % 5
+        self._apply_mode(next_mode)
+
+    def _cycle_mode_backward(self):
+        """Cycle to previous mode: Pro → Lab → Rapid Lab → Rapid → Preview → Pro."""
+        current = self._get_current_mode()
+        if current == -1:
+            current = 0  # Start from Preview if no mode selected
+        prev_mode = (current - 1) % 5
+        self._apply_mode(prev_mode)
+
+    def _apply_mode(self, mode: int):
+        """Apply mode by index: 0=Preview, 1=Rapid, 2=RapidLab, 3=Lab, 4=Pro."""
+        if mode == 0:
+            self._set_mode_preview()
+        elif mode == 1:
+            self._set_mode_rapid()
+        elif mode == 2:
+            self._set_mode_rapid_lab()
+        elif mode == 3:
+            self._set_mode_lab()
+        elif mode == 4:
+            self._set_mode_pro()
 
     def _on_fine_rotation_changed(self, value: float):
         """Handle fine rotation change from shared transform state."""
