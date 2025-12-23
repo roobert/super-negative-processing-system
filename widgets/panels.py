@@ -704,6 +704,10 @@ class CollapsiblePresetPanel(QWidget):
     """
 
     presetSelected = Signal(str)  # Pass-through from PresetBar
+    savePresetRequested = Signal()  # Pass-through from PresetBar save button
+    updatePresetRequested = Signal(str)  # Pass-through from PresetBar update button
+    deletePresetRequested = Signal(str)  # Pass-through from PresetBar delete button
+    applyToAllRequested = Signal(str)  # Pass-through from PresetBar apply-to-all button
     visibilityChanged = Signal(bool)  # Emitted when panel is shown/hidden
     fullModeChanged = Signal(bool)  # Emitted when entering/exiting full mode
 
@@ -741,6 +745,10 @@ class CollapsiblePresetPanel(QWidget):
         # The preset bar (main content)
         self._preset_bar = PresetBar()
         self._preset_bar.presetSelected.connect(self.presetSelected.emit)
+        self._preset_bar.savePresetRequested.connect(self.savePresetRequested.emit)
+        self._preset_bar.updatePresetRequested.connect(self.updatePresetRequested.emit)
+        self._preset_bar.deletePresetRequested.connect(self.deletePresetRequested.emit)
+        self._preset_bar.applyToAllRequested.connect(self.applyToAllRequested.emit)
         layout.addWidget(self._preset_bar)
 
         # Split vertical toggle button on the right edge
@@ -934,6 +942,14 @@ class CollapsiblePresetPanel(QWidget):
         """Select next preset."""
         return self._preset_bar.select_next_preset()
 
+    def add_user_preset(self, key: str, name: str, description: str = ""):
+        """Add a new user preset to the bar."""
+        self._preset_bar.add_user_preset(key, name, description)
+
+    def remove_preset(self, key: str):
+        """Remove a preset from the bar."""
+        self._preset_bar.remove_preset(key)
+
     @property
     def preset_bar(self) -> PresetBar:
         """Access the underlying PresetBar widget."""
@@ -1087,122 +1103,3 @@ class CollapsibleControlsPanel(BaseCollapsiblePanel):
 
     def _get_collapsed_tooltip(self) -> str:
         return "Show controls panel (~ or ±)"
-
-
-class TabbedRightPanel(BaseCollapsiblePanel):
-    """Collapsible right panel with tabbed content (Controls/Transform).
-
-    This panel contains two tabs:
-    - Tab 0: Controls (detection or adjustment controls)
-    - Tab 1: Transform (rotation, grid, crop tools)
-    """
-
-    TAB_CONTROLS = 0
-    TAB_TRANSFORM = 1
-    EXPANDED_WIDTH = 320
-
-    def __init__(self, panel_name: str, controls_widget: QWidget,
-                 transform_widget: TransformControlsWidget,
-                 storage_key: str = "controls"):
-        """
-        Args:
-            panel_name: Name for toggle button (e.g., "CONTROLS" or "ADJUSTMENTS")
-            controls_widget: Widget for the first tab (controls/adjustments)
-            transform_widget: Widget for the second tab (transform tools)
-            storage_key: Key prefix for storage ('controls' or 'adjustments')
-        """
-        self._panel_name = panel_name
-        self._controls_widget = controls_widget
-        self._transform_widget = transform_widget
-        self._storage_key = storage_key
-        self._tab_bar = None
-        self._stack = None
-        super().__init__(toggle_on_left=True)  # Toggle button on left
-
-    def _get_initial_expanded_state(self) -> bool:
-        store = storage.get_storage()
-        if self._storage_key == "adjustments":
-            behavior = store.get_adjustments_panel_startup_behavior()
-            if behavior == 'expanded':
-                return True
-            elif behavior == 'collapsed':
-                return False
-            return store.get_adjustments_panel_expanded()
-        else:  # controls
-            behavior = store.get_controls_panel_startup_behavior()
-            if behavior == 'expanded':
-                return True
-            elif behavior == 'collapsed':
-                return False
-            return store.get_controls_panel_expanded()
-
-    def _save_expanded_state(self, expanded: bool):
-        store = storage.get_storage()
-        if self._storage_key == "adjustments":
-            store.set_adjustments_panel_expanded(expanded)
-        else:
-            store.set_controls_panel_expanded(expanded)
-
-    def _setup_content(self) -> QWidget:
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # Tab bar at top
-        self._tab_bar = QTabBar()
-        self._tab_bar.addTab("Controls")
-        self._tab_bar.addTab("Transform")
-        self._tab_bar.setExpanding(False)
-        self._tab_bar.currentChanged.connect(self._on_tab_changed)
-        self._tab_bar.setStyleSheet(Styles.TAB_BAR)
-        content_layout.addWidget(self._tab_bar)
-
-        # Stacked widget for tab content
-        self._stack = QStackedWidget()
-        self._stack.addWidget(self._controls_widget)
-        self._stack.addWidget(self._transform_widget)
-        content_layout.addWidget(self._stack, 1)
-
-        return content
-
-    def _create_toggle_button(self) -> QWidget:
-        return VerticalToggleButton(self._panel_name, side="left")
-
-    def _get_expanded_tooltip(self) -> str:
-        shortcut = "A" if self._storage_key == "adjustments" else "~ or ±"
-        return f"Hide {self._panel_name.lower()} panel ({shortcut})"
-
-    def _get_collapsed_tooltip(self) -> str:
-        shortcut = "A" if self._storage_key == "adjustments" else "~ or ±"
-        return f"Show {self._panel_name.lower()} panel ({shortcut})"
-
-    def _on_tab_changed(self, index: int):
-        """Handle tab switch."""
-        self._stack.setCurrentIndex(index)
-
-    def current_tab(self) -> int:
-        """Return the current tab index."""
-        return self._tab_bar.currentIndex()
-
-    def set_current_tab(self, index: int):
-        """Set the current tab."""
-        self._tab_bar.setCurrentIndex(index)
-
-    def show_transform_tab(self):
-        """Switch to the transform tab."""
-        self._tab_bar.setCurrentIndex(self.TAB_TRANSFORM)
-
-    def show_controls_tab(self):
-        """Switch to the controls tab."""
-        self._tab_bar.setCurrentIndex(self.TAB_CONTROLS)
-
-    @property
-    def transform_widget(self) -> TransformControlsWidget:
-        """Access the transform controls widget."""
-        return self._transform_widget
-
-    @property
-    def controls_widget(self) -> QWidget:
-        """Access the controls widget."""
-        return self._controls_widget

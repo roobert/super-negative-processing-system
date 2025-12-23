@@ -399,15 +399,82 @@ PRESET_ORDER = [
 
 
 def get_preset(key: str) -> dict:
-    """Get a preset by key. Returns None preset if not found."""
-    return PRESETS.get(key, PRESETS['none'])
+    """Get a preset by key (built-in or user). Returns None preset if not found."""
+    # Check built-in presets first
+    if key in PRESETS:
+        return PRESETS[key]
+    # Check user presets
+    import storage
+    user_presets = storage.get_storage().get_user_presets()
+    return user_presets.get(key, PRESETS['none'])
 
 
 def get_preset_list() -> list:
-    """Get list of (key, name, description) tuples in display order."""
+    """Get list of (key, name, description) tuples in display order.
+
+    Returns built-in presets first, then user presets.
+    """
     result = []
+    # Built-in presets in defined order
     for key in PRESET_ORDER:
         preset = PRESETS.get(key)
         if preset:
             result.append((key, preset['name'], preset['description']))
+
+    # User presets (sorted by name)
+    import storage
+    user_presets = storage.get_storage().get_user_presets()
+    user_items = [(k, p['name'], p.get('description', '')) for k, p in user_presets.items()]
+    user_items.sort(key=lambda x: x[1].lower())  # Sort by name
+    result.extend(user_items)
+
     return result
+
+
+def is_user_preset(key: str) -> bool:
+    """Check if a preset key is a user-created preset."""
+    return key not in PRESETS
+
+
+def create_user_preset(name: str, description: str, adjustments: dict, curves: dict) -> str:
+    """Create a new user preset and save it to storage.
+
+    Args:
+        name: Display name for the preset
+        description: Brief description
+        adjustments: Adjustment values dict
+        curves: Curves dict with rgb, r, g, b keys
+
+    Returns:
+        The generated preset key
+    """
+    import storage
+    import time
+
+    # Generate a unique key from name + timestamp
+    key = f"user_{name.lower().replace(' ', '_')}_{int(time.time())}"
+
+    preset = {
+        'name': name,
+        'description': description,
+        'adjustments': adjustments.copy(),
+        'curves': {ch: list(pts) for ch, pts in curves.items()},
+    }
+
+    storage.get_storage().save_user_preset(key, preset)
+    return key
+
+
+def delete_user_preset(key: str) -> bool:
+    """Delete a user preset.
+
+    Args:
+        key: The preset key to delete
+
+    Returns:
+        True if deleted, False if not found or is a built-in preset
+    """
+    if key in PRESETS:
+        return False  # Can't delete built-in presets
+    import storage
+    return storage.get_storage().delete_user_preset(key)

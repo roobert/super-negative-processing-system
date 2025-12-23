@@ -660,6 +660,43 @@ class Storage:
         self.set_favorite_images(favorites)
         return is_favorite
 
+    def get_user_presets(self) -> dict:
+        """Get all user-saved presets. Returns {key: preset_dict}."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT value FROM preferences WHERE key = 'user_presets'"
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return json.loads(row[0])
+            return {}
+
+    def save_user_preset(self, key: str, preset: dict):
+        """Save a user preset. Preset should have 'name', 'description', 'adjustments', 'curves'."""
+        presets = self.get_user_presets()
+        presets[key] = preset
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO preferences (key, value)
+                VALUES ('user_presets', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, (json.dumps(presets),))
+            conn.commit()
+
+    def delete_user_preset(self, key: str) -> bool:
+        """Delete a user preset by key. Returns True if deleted, False if not found."""
+        presets = self.get_user_presets()
+        if key in presets:
+            del presets[key]
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO preferences (key, value)
+                    VALUES ('user_presets', ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """, (json.dumps(presets),))
+                conn.commit()
+            return True
+        return False
 
     def save_raw_cache(self, file_hash: str, img: np.ndarray):
         """Cache a demosaiced RAW image to disk as 16-bit lossless PNG.

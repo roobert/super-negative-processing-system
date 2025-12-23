@@ -6,12 +6,94 @@ Modal dialogs for settings and keyboard shortcuts help.
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QComboBox, QDialogButtonBox, QCheckBox, QPushButton, QWidget
+    QComboBox, QDialogButtonBox, QCheckBox, QPushButton, QWidget,
+    QLineEdit, QTextEdit
 )
 from PySide6.QtCore import Qt
 
 from state import TransformState
 import storage
+
+
+class SavePresetDialog(QDialog):
+    """Dialog for saving a new user preset."""
+
+    def __init__(self, parent=None, default_name: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle("Save Preset")
+        self.setMinimumWidth(350)
+        self._preset_name = ""
+        self._preset_description = ""
+        self._default_name = default_name
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        # Name input
+        name_layout = QHBoxLayout()
+        name_label = QLabel("Name:")
+        name_label.setFixedWidth(80)
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText("Enter preset name...")
+        self._name_edit.setText(self._default_name)
+        self._name_edit.textChanged.connect(self._validate)
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(self._name_edit)
+        layout.addLayout(name_layout)
+
+        # Description input (optional)
+        desc_layout = QHBoxLayout()
+        desc_label = QLabel("Description:")
+        desc_label.setFixedWidth(80)
+        desc_label.setAlignment(Qt.AlignTop)
+        self._desc_edit = QTextEdit()
+        self._desc_edit.setPlaceholderText("Optional description...")
+        self._desc_edit.setMaximumHeight(60)
+        desc_layout.addWidget(desc_label)
+        desc_layout.addWidget(self._desc_edit)
+        layout.addLayout(desc_layout)
+
+        # Info text
+        info_label = QLabel("The current adjustments and curves will be saved as a new preset.")
+        info_label.setStyleSheet("color: #888; font-size: 11px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # Spacer
+        layout.addStretch()
+
+        # Dialog buttons
+        self._button_box = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel
+        )
+        self._save_button = self._button_box.button(QDialogButtonBox.Save)
+        self._button_box.accepted.connect(self._save_and_accept)
+        self._button_box.rejected.connect(self.reject)
+        layout.addWidget(self._button_box)
+
+        # Initial validation
+        self._validate()
+
+    def _validate(self):
+        """Validate input and enable/disable save button."""
+        name = self._name_edit.text().strip()
+        self._save_button.setEnabled(len(name) > 0)
+
+    def _save_and_accept(self):
+        """Save values and accept."""
+        self._preset_name = self._name_edit.text().strip()
+        self._preset_description = self._desc_edit.toPlainText().strip()
+        self.accept()
+
+    def get_preset_name(self) -> str:
+        """Get the entered preset name."""
+        return self._preset_name
+
+    def get_preset_description(self) -> str:
+        """Get the entered preset description."""
+        return self._preset_description
 
 
 class KeybindingsDialog(QDialog):

@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QSlider, QPushButton, QFileDialog, QGroupBox,
     QSpinBox, QDoubleSpinBox, QSizePolicy, QScrollArea, QFrame, QCheckBox,
-    QStackedWidget, QTabBar, QButtonGroup, QDialog, QComboBox, QDialogButtonBox
+    QStackedWidget, QTabBar, QButtonGroup, QDialog, QComboBox, QDialogButtonBox,
+    QMessageBox
 )
 from scipy.interpolate import PchipInterpolator
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, QPropertyAnimation, QEasingCurve, QMimeData, QPoint, QRect
@@ -65,7 +66,6 @@ from widgets import (
     CollapsibleAdjustmentsPanel,
     CollapsibleDebugPanel,
     CollapsibleControlsPanel,
-    TabbedRightPanel,
 )
 
 
@@ -437,6 +437,7 @@ class NegativeDetectorGUI(QMainWindow):
         self.adjustments_view._preview.cropCornerDragStarted.connect(self._on_crop_corner_drag_started)
         self.adjustments_view._preview.cropCornerDragged.connect(self._on_crop_corner_dragged)
         self.adjustments_view._preview.cropBoxMoved.connect(self._on_crop_box_moved)
+        self.adjustments_view.applyPresetToAllRequested.connect(self._on_apply_preset_to_all)
         self.view_stack.addWidget(self.adjustments_view)
 
         # Connect shared transform state signals to handlers
@@ -1297,6 +1298,78 @@ class NegativeDetectorGUI(QMainWindow):
             self.adjustments_view.set_preset_state({'active_preset': 'none', 'preset_states': {}})
             self._crop_adjustment = {'left': 0, 'top': 0, 'right': 0, 'bottom': 0}
             self._update_crop_reset_button_styles()
+
+    def _on_apply_preset_to_all(self, preset_key: str):
+        """Apply a preset to all loaded images."""
+        if not self.file_list:
+            return
+
+        # Get preset display name
+        preset_info = presets.get_preset(preset_key)
+        preset_name = preset_info.get('name', preset_key)
+
+        # Count images that will be affected
+        image_count = len(self.file_list)
+
+        # Ask for confirmation
+        reply = QMessageBox.question(
+            self,
+            "Apply Preset to All Images",
+            f"Apply '{preset_name}' to all {image_count} loaded images?\n\n"
+            "This will set the active preset for each image. "
+            "Any per-image customizations will be preserved.",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        # Save current image settings first
+        self._save_current_settings()
+
+        # Apply preset to all images
+        applied_count = 0
+        for path in self.file_list:
+            image_hash = self._file_hashes.get(path)
+            if not image_hash:
+                continue
+
+            # Load existing settings or create defaults
+            existing_settings = self._storage.load_settings(image_hash)
+            if existing_settings:
+                # Update the preset state while preserving other settings
+                preset_state = existing_settings.get('preset_state', {'active_preset': 'none', 'preset_states': {}})
+                preset_state['active_preset'] = preset_key
+                existing_settings['preset_state'] = preset_state
+                self._storage.save_settings(image_hash, existing_settings)
+            else:
+                # Create minimal settings with just the preset
+                new_settings = {
+                    'preset_state': {
+                        'active_preset': preset_key,
+                        'preset_states': {}
+                    }
+                }
+                self._storage.save_settings(image_hash, new_settings)
+
+            # Update in-memory cache if present
+            if path in self.image_settings:
+                if 'preset_state' not in self.image_settings[path]:
+                    self.image_settings[path]['preset_state'] = {'active_preset': 'none', 'preset_states': {}}
+                self.image_settings[path]['preset_state']['active_preset'] = preset_key
+
+            applied_count += 1
+
+        # Reload current image to reflect changes
+        if self.current_path:
+            self._load_settings_for_image(self.current_path)
+            self._process_full()
+
+        # Show confirmation flash
+        self.adjustments_view._preview.flash_preset_name(
+            f"Applied '{preset_name}' to {applied_count} images"
+        )
 
     def _on_thumbnail_selected(self, index: int):
         """Handle thumbnail click."""

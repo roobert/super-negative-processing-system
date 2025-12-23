@@ -16,6 +16,7 @@ from widgets.controls import (
 from widgets.dialogs import (
     KeybindingsDialog,
     SettingsDialog,
+    SavePresetDialog,
 )
 
 # Thumbnail bar
@@ -55,7 +56,6 @@ from widgets.panels import (
     CollapsibleAdjustmentsPanel,
     CollapsibleDebugPanel,
     CollapsibleControlsPanel,
-    TabbedRightPanel,
 )
 
 __all__ = [
@@ -67,6 +67,7 @@ __all__ = [
     # Dialogs
     'KeybindingsDialog',
     'SettingsDialog',
+    'SavePresetDialog',
     # Thumbnail bar
     'ThumbnailLoaderWorker',
     'ThumbnailItem',
@@ -91,5 +92,4 @@ __all__ = [
     'CollapsibleAdjustmentsPanel',
     'CollapsibleDebugPanel',
     'CollapsibleControlsPanel',
-    'TabbedRightPanel',
 ]

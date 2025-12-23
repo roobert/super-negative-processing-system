@@ -1314,6 +1314,7 @@ class AdjustmentsView(QWidget):
     # Signals for changes
     adjustmentsChanged = Signal()  # Emitted when any adjustment changes
     presetSelected = Signal(str)  # Emitted when a preset is selected
+    applyPresetToAllRequested = Signal(str)  # Emitted when user wants to apply preset to all images
 
     def __init__(self, transform_state: TransformState):
         super().__init__()
@@ -1337,6 +1338,10 @@ class AdjustmentsView(QWidget):
         self._preset_panel = CollapsiblePresetPanel()
         self._preset_panel.presetSelected.connect(self._on_preset_selected)
         self._preset_panel.fullModeChanged.connect(self._on_preset_full_mode_changed)
+        self._preset_panel.savePresetRequested.connect(self._on_save_preset_requested)
+        self._preset_panel.updatePresetRequested.connect(self._on_update_preset_requested)
+        self._preset_panel.deletePresetRequested.connect(self._on_delete_preset_requested)
+        self._preset_panel.applyToAllRequested.connect(self.applyPresetToAllRequested.emit)
         layout.addWidget(self._preset_panel)
 
         # Middle: Preview area (full height, transform is now in right panel)
@@ -1751,6 +1756,113 @@ class AdjustmentsView(QWidget):
         # Flash the preset name
         preset = presets.get_preset(preset_key)
         self._preview.flash_preset_name(preset.get('name', preset_key))
+
+    def _on_save_preset_requested(self):
+        """Handle save preset button click - show dialog and save current settings."""
+        from widgets.dialogs import SavePresetDialog
+
+        # Get current preset name as default suggestion
+        current_preset = presets.get_preset(self._current_preset)
+        default_name = ""
+        if self._current_preset != 'none':
+            default_name = current_preset.get('name', '') + " (Copy)"
+
+        dialog = SavePresetDialog(self, default_name)
+        if dialog.exec() == SavePresetDialog.Accepted:
+            name = dialog.get_preset_name()
+            description = dialog.get_preset_description()
+
+            # Get current adjustments and curves
+            adjustments = self.get_adjustments()
+            curves = self.curves_widget.get_curves()
+
+            # Create the preset
+            key = presets.create_user_preset(name, description, adjustments, curves)
+
+            # Add to the preset bar
+            self._preset_panel.add_user_preset(key, name, description)
+
+            # Select the new preset
+            self._preset_panel.select_preset(key)
+            self._current_preset = key
+
+            # Flash the new preset name
+            self._preview.flash_preset_name(f"Saved: {name}")
+
+    def _on_update_preset_requested(self, preset_key: str):
+        """Handle update preset request - show confirmation and overwrite."""
+        from PySide6.QtWidgets import QMessageBox
+
+        # Get preset name for confirmation dialog
+        preset = presets.get_preset(preset_key)
+        preset_name = preset.get('name', preset_key)
+
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "Update Preset",
+            f"Overwrite '{preset_name}' with current settings?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            # Get current adjustments and curves
+            adjustments = self.get_adjustments()
+            curves = self.curves_widget.get_curves()
+
+            # Update the preset in storage (keep same name and description)
+            updated_preset = {
+                'name': preset_name,
+                'description': preset.get('description', ''),
+                'adjustments': adjustments.copy(),
+                'curves': {ch: list(pts) for ch, pts in curves.items()},
+            }
+            import storage
+            storage.get_storage().save_user_preset(preset_key, updated_preset)
+
+            # Update slider and curves preset defaults
+            self._update_slider_preset_defaults(preset_key)
+            self._update_curves_preset_default(preset_key)
+
+            # Clear the modified state for this preset
+            if preset_key in self._preset_states:
+                del self._preset_states[preset_key]
+            self._preset_panel.set_modified(preset_key, False)
+
+            # Flash confirmation
+            self._preview.flash_preset_name(f"Updated: {preset_name}")
+
+    def _on_delete_preset_requested(self, preset_key: str):
+        """Handle delete preset request - show confirmation and delete."""
+        from PySide6.QtWidgets import QMessageBox
+
+        # Get preset name for confirmation dialog
+        preset = presets.get_preset(preset_key)
+        preset_name = preset.get('name', preset_key)
+
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "Delete Preset",
+            f"Are you sure you want to delete '{preset_name}'?\n\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            # Delete from storage
+            if presets.delete_user_preset(preset_key):
+                # Remove from preset bar
+                self._preset_panel.remove_preset(preset_key)
+
+                # If this was the current preset, switch to 'none'
+                if self._current_preset == preset_key:
+                    self._current_preset = 'none'
+                    self._load_preset('none')
+
+                # Flash confirmation
+                self._preview.flash_preset_name(f"Deleted: {preset_name}")
 
     def _get_adjustment_sliders(self) -> dict:
         """Return mapping of adjustment names to slider widgets."""

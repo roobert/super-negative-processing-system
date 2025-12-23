@@ -22,14 +22,17 @@ class PresetThumbnailItem(QFrame):
 
     clicked = Signal(str)  # Emits preset key
     favoriteToggled = Signal(str, bool)  # Emits (preset_key, is_favorite)
+    deleteRequested = Signal(str)  # Emits preset_key when delete is clicked
+    saveRequested = Signal(str)  # Emits preset_key when save is clicked
 
-    def __init__(self, preset_key: str, preset_name: str):
+    def __init__(self, preset_key: str, preset_name: str, is_user_preset: bool = False):
         super().__init__()
         self.preset_key = preset_key
         self.preset_name = preset_name
         self._is_modified = False
         self._is_selected = False
         self._is_favorite = False
+        self._is_user_preset = is_user_preset
         self._number = 0  # 0 = no number, 1-9 = shortcut number
         self._drag_start_pos = None  # For drag-and-drop
 
@@ -67,11 +70,59 @@ class PresetThumbnailItem(QFrame):
         else:
             self._update_star_style()
 
-        # Number label (top-left corner overlay)
+        # Delete button (top-left corner overlay) - only for user presets
+        self._delete_btn = QPushButton("×", self)
+        self._delete_btn.setFixedSize(28, 28)
+        self._delete_btn.setCursor(Qt.PointingHandCursor)
+        self._delete_btn.clicked.connect(self._on_delete_clicked)
+        self._delete_btn.move(6, 6)
+        self._delete_btn.setToolTip("Delete this preset")
+        self._delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.5);
+                color: #aaa;
+                border: none;
+                border-radius: 4px;
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(192, 57, 43, 0.9);
+                color: white;
+            }
+        """)
+        if not is_user_preset:
+            self._delete_btn.hide()
+
+        # Save button (next to delete button) - only for user presets
+        self._save_btn = QPushButton("💾", self)
+        self._save_btn.setFixedSize(28, 28)
+        self._save_btn.setCursor(Qt.PointingHandCursor)
+        self._save_btn.clicked.connect(self._on_save_clicked)
+        self._save_btn.move(36, 6)
+        self._save_btn.setToolTip("Save current settings to this preset")
+        self._save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.5);
+                color: #aaa;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: rgba(39, 174, 96, 0.9);
+                color: white;
+            }
+        """)
+        if not is_user_preset:
+            self._save_btn.hide()
+
+        # Number label (top-left corner overlay, shifted right if user preset buttons visible)
         self._number_label = QLabel(self)
         self._number_label.setFixedSize(24, 24)
         self._number_label.setAlignment(Qt.AlignCenter)
-        self._number_label.move(8, 8)
+        # Position after delete+save buttons for user presets, otherwise at left edge
+        self._number_label.move(68 if is_user_preset else 8, 8)
         self._update_number_label()
 
         # Name label
@@ -154,6 +205,14 @@ class PresetThumbnailItem(QFrame):
         self._is_favorite = not self._is_favorite
         self._update_star_style()
         self.favoriteToggled.emit(self.preset_key, self._is_favorite)
+
+    def _on_delete_clicked(self):
+        """Handle delete button click - emit delete request."""
+        self.deleteRequested.emit(self.preset_key)
+
+    def _on_save_clicked(self):
+        """Handle save button click - emit save request."""
+        self.saveRequested.emit(self.preset_key)
 
     def set_favorite(self, is_favorite: bool):
         """Set the favorite state (without emitting signal)."""
@@ -317,6 +376,11 @@ class PresetBar(QScrollArea):
     """
 
     presetSelected = Signal(str)  # Emits preset key
+    savePresetRequested = Signal()  # Emitted when user clicks save button
+    updatePresetRequested = Signal(str)  # Emitted when user clicks update on current preset
+    deletePresetRequested = Signal(str)  # Emitted when user clicks delete on a preset
+    applyToAllRequested = Signal(str)  # Emitted when user clicks apply to all on a preset
+    userPresetAdded = Signal(str)  # Emitted when a new user preset is added (key)
 
     THUMB_WIDTH = 260  # Thumbnail width
     THUMB_SPACING = 5  # Spacing between thumbnails
@@ -335,6 +399,60 @@ class PresetBar(QScrollArea):
         self.layout = QVBoxLayout()
         self.layout.setContentsMargins(3, 5, 3, 5)
         self.layout.setSpacing(5)
+
+        # Save button at the top (for creating new presets)
+        self._save_new_btn = QPushButton("+ Save as New Preset")
+        self._save_new_btn.setCursor(Qt.PointingHandCursor)
+        self._save_new_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a2a;
+                color: #ccc;
+                border: 1px dashed #555;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #3a3a3a;
+                border-color: #e67e22;
+                color: #e67e22;
+            }
+            QPushButton:pressed {
+                background-color: #444;
+            }
+        """)
+        self._save_new_btn.clicked.connect(self.savePresetRequested.emit)
+        self.layout.addWidget(self._save_new_btn)
+
+        # Apply to All Images button
+        self._apply_all_btn = QPushButton("Apply Preset to All Images")
+        self._apply_all_btn.setCursor(Qt.PointingHandCursor)
+        self._apply_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a3a4a;
+                color: #8ac;
+                border: 1px solid #48c;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #3a4a5a;
+                border-color: #6ae;
+                color: #adf;
+            }
+            QPushButton:pressed {
+                background-color: #4a5a6a;
+            }
+            QPushButton:disabled {
+                background-color: #222;
+                color: #555;
+                border-color: #333;
+            }
+        """)
+        self._apply_all_btn.clicked.connect(self._on_apply_all_clicked)
+        self._apply_all_btn.setEnabled(False)  # Disabled until a non-'none' preset is selected
+        self.layout.addWidget(self._apply_all_btn)
 
         self.container = PresetBarContainer(self.layout)
         self.container.setFixedWidth(265)
@@ -388,10 +506,13 @@ class PresetBar(QScrollArea):
         """Create thumbnail items for all presets."""
         preset_list = presets.get_preset_list()
         for key, name, description in preset_list:
-            thumb = PresetThumbnailItem(key, name)
+            is_user = presets.is_user_preset(key)
+            thumb = PresetThumbnailItem(key, name, is_user_preset=is_user)
             thumb.setToolTip(f"{name}\n{description}")
             thumb.clicked.connect(self._on_thumb_clicked)
             thumb.favoriteToggled.connect(self._on_favorite_toggled)
+            thumb.deleteRequested.connect(self._on_delete_requested)
+            thumb.saveRequested.connect(self._on_save_requested)
             thumb.set_favorite(key in self._favorites)
             self.thumbnails[key] = thumb
 
@@ -402,10 +523,57 @@ class PresetBar(QScrollArea):
         if 'none' in self.thumbnails:
             self.thumbnails['none'].set_selected(True)
 
+    def add_user_preset(self, key: str, name: str, description: str = ""):
+        """Add a new user preset to the bar and generate its preview thumbnail.
+
+        Args:
+            key: The preset key
+            name: Display name
+            description: Optional description
+        """
+        if key in self.thumbnails:
+            return  # Already exists
+
+        # Create the thumbnail item (user presets have delete and save buttons)
+        thumb = PresetThumbnailItem(key, name, is_user_preset=True)
+        thumb.setToolTip(f"{name}\n{description}" if description else name)
+        thumb.clicked.connect(self._on_thumb_clicked)
+        thumb.favoriteToggled.connect(self._on_favorite_toggled)
+        thumb.deleteRequested.connect(self._on_delete_requested)
+        thumb.saveRequested.connect(self._on_save_requested)
+        self.thumbnails[key] = thumb
+
+        # Generate preview if we have a base image
+        if self._base_image is not None:
+            preset = presets.get_preset(key)
+            # Downscale for preview
+            h, w = self._base_image.shape[:2]
+            max_thumb_dim = 260
+            if max(h, w) > max_thumb_dim:
+                scale = max_thumb_dim / max(h, w)
+                thumb_base = cv2.resize(self._base_image, (int(w * scale), int(h * scale)),
+                                        interpolation=cv2.INTER_AREA)
+            else:
+                thumb_base = self._base_image
+            preview = self._apply_preset_to_image(thumb_base, preset)
+            thumb.set_image(preview)
+
+        # Reorder to include the new preset
+        self._reorder_thumbnails()
+
+        # Emit signal
+        self.userPresetAdded.emit(key)
+
     def _get_sorted_keys(self) -> list:
-        """Get preset keys sorted: 'none' first, then by custom order/favorites."""
+        """Get preset keys sorted: 'none' first, then by custom order/favorites.
+
+        Only returns keys that exist in self.thumbnails to handle deletions.
+        """
         preset_list = presets.get_preset_list()
         all_keys = [key for key, _, _ in preset_list]
+
+        # Filter to only keys we have thumbnails for
+        all_keys = [k for k in all_keys if k in self.thumbnails]
 
         # 'none' is always first
         result = ['none'] if 'none' in all_keys else []
@@ -431,7 +599,7 @@ class PresetBar(QScrollArea):
 
     def _reorder_thumbnails(self):
         """Reorder thumbnails in the layout based on favorites and current mode."""
-        # Remove all widgets/layouts from layout
+        # Remove all widgets/layouts from layout (but keep reference to save button)
         while self.layout.count():
             item = self.layout.takeAt(0)
             # If it's a layout (row), remove widgets from it too
@@ -439,6 +607,10 @@ class PresetBar(QScrollArea):
                 row_layout = item.layout()
                 while row_layout.count():
                     row_layout.takeAt(0)
+
+        # Re-add buttons at the top
+        self.layout.addWidget(self._save_new_btn)
+        self.layout.addWidget(self._apply_all_btn)
 
         # Get sorted order
         self._ordered_keys = self._get_sorted_keys()
@@ -503,6 +675,45 @@ class PresetBar(QScrollArea):
         self._update_custom_order_from_current()
 
         # Reorder thumbnails
+        self._reorder_thumbnails()
+
+    def _on_delete_requested(self, preset_key: str):
+        """Handle delete request from a thumbnail - forward to parent."""
+        self.deletePresetRequested.emit(preset_key)
+
+    def _on_save_requested(self, preset_key: str):
+        """Handle save request from a thumbnail - forward to parent."""
+        self.updatePresetRequested.emit(preset_key)
+
+    def remove_preset(self, preset_key: str):
+        """Remove a preset from the bar (after it's been deleted from storage).
+
+        Args:
+            preset_key: The preset key to remove
+        """
+        if preset_key not in self.thumbnails:
+            return
+
+        # Remove from thumbnails dict
+        thumb = self.thumbnails.pop(preset_key)
+        thumb.deleteLater()
+
+        # Remove from favorites if present
+        self._favorites.discard(preset_key)
+
+        # Remove from custom order if present
+        if preset_key in self._custom_order:
+            self._custom_order.remove(preset_key)
+            storage.get_storage().set_preset_order(self._custom_order)
+
+        # If this was the current selection, switch to 'none'
+        if self.current_key == preset_key:
+            self.current_key = 'none'
+            if 'none' in self.thumbnails:
+                self.thumbnails['none'].set_selected(True)
+            self.presetSelected.emit('none')
+
+        # Reorder to update the layout
         self._reorder_thumbnails()
 
     def _on_drop_requested(self, preset_key: str, target_index: int):
@@ -621,6 +832,14 @@ class PresetBar(QScrollArea):
         if preset_key in self.thumbnails:
             self.thumbnails[preset_key].set_selected(True)
             self.ensureWidgetVisible(self.thumbnails[preset_key])
+
+        # Enable/disable apply all button based on selection
+        self._apply_all_btn.setEnabled(preset_key != 'none')
+
+    def _on_apply_all_clicked(self):
+        """Handle apply to all images button click."""
+        if self.current_key and self.current_key != 'none':
+            self.applyToAllRequested.emit(self.current_key)
 
     def set_base_image(self, img: np.ndarray, image_hash: str = None):
         """Set the base image and generate all preset preview thumbnails.
