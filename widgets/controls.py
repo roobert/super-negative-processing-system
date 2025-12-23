@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QRect
 from PySide6.QtGui import QPainter, QColor, QPen, QFont
 
+from ui_constants import Colors, Dimensions, get_accent_button_style, get_danger_button_style
+
 
 class SliderWithButtons(QWidget):
     """A slider with +/- buttons for fine adjustment and reset.
@@ -234,8 +236,7 @@ class SliderWithButtons(QWidget):
                 self.reset_btn.setStyleSheet("")
                 self.reset_btn.setToolTip(f"At default: {self.default:.{self.decimals}f}")
             else:
-                self.reset_btn.setStyleSheet(
-                    "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+                self.reset_btn.setStyleSheet(get_accent_button_style())
                 self.reset_btn.setToolTip(f"Reset → {self.default:.{self.decimals}f}")
         elif at_absolute and at_preset:
             # At both defaults (they're equal) - no reset needed
@@ -243,18 +244,15 @@ class SliderWithButtons(QWidget):
             self.reset_btn.setToolTip(f"At default: {self.default:.{self.decimals}f}")
         elif at_preset and not at_absolute:
             # Orange: at preset default, can go to absolute
-            self.reset_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self.reset_btn.setStyleSheet(get_accent_button_style())
             self.reset_btn.setToolTip(f"Reset to absolute → {self.default:.{self.decimals}f}")
         elif at_absolute and not at_preset:
             # Blue: at absolute default, can go to preset
-            self.reset_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self.reset_btn.setStyleSheet(get_accent_button_style())
             self.reset_btn.setToolTip(f"Reset to preset → {self._preset_default:.{self.decimals}f}")
         else:
             # Red: tweaked away from preset, can go to preset
-            self.reset_btn.setStyleSheet(
-                "QPushButton { background-color: #e74c3c; color: white; font-weight: bold; }")
+            self.reset_btn.setStyleSheet(get_danger_button_style())
             self.reset_btn.setToolTip(f"Reset to preset → {self._preset_default:.{self.decimals}f}")
 
     def _show_info(self):
@@ -320,12 +318,12 @@ class VerticalToggleButton(QWidget):
 
         # Background
         if self._hovered:
-            painter.fillRect(self.rect(), QColor("#3a3a3a"))
+            painter.fillRect(self.rect(), QColor(Colors.BACKGROUND_MEDIUM))
         else:
-            painter.fillRect(self.rect(), QColor("#2a2a2a"))
+            painter.fillRect(self.rect(), QColor(Colors.BACKGROUND_DARK))
 
         # Border (left border for right-side button, right border for left-side button)
-        painter.setPen(QPen(QColor("#3a3a3a"), 1))
+        painter.setPen(QPen(QColor(Colors.BACKGROUND_MEDIUM), 1))
         if self._side == "right":
             painter.drawLine(0, 0, 0, self.height())
         else:
@@ -344,9 +342,9 @@ class VerticalToggleButton(QWidget):
         painter.setFont(font)
 
         if self._hovered:
-            painter.setPen(QColor("#ffffff"))
+            painter.setPen(QColor(Colors.TEXT_PRIMARY))
         else:
-            painter.setPen(QColor("#888888"))
+            painter.setPen(QColor(Colors.TEXT_MUTED))
 
         # Draw the text centered, with arrow indicator
         # Arrow direction depends on side and collapsed state:
@@ -420,23 +418,23 @@ class SplitVerticalToggleButton(QWidget):
         # Draw top zone background
         top_rect = QRect(0, 0, self.width(), mid_y)
         if self._hovered_zone == 'top':
-            painter.fillRect(top_rect, QColor("#3a3a3a"))
+            painter.fillRect(top_rect, QColor(Colors.BACKGROUND_MEDIUM))
         else:
-            painter.fillRect(top_rect, QColor("#2a2a2a"))
+            painter.fillRect(top_rect, QColor(Colors.BACKGROUND_DARK))
 
         # Draw bottom zone background
         bottom_rect = QRect(0, mid_y, self.width(), self.height() - mid_y)
         if self._hovered_zone == 'bottom':
-            painter.fillRect(bottom_rect, QColor("#3a3a3a"))
+            painter.fillRect(bottom_rect, QColor(Colors.BACKGROUND_MEDIUM))
         else:
-            painter.fillRect(bottom_rect, QColor("#2a2a2a"))
+            painter.fillRect(bottom_rect, QColor(Colors.BACKGROUND_DARK))
 
         # Draw divider line between zones
-        painter.setPen(QPen(QColor("#444444"), 1))
+        painter.setPen(QPen(QColor(Colors.BORDER_DARK), 1))
         painter.drawLine(4, mid_y, self.width() - 4, mid_y)
 
         # Border on left side (panel is on right)
-        painter.setPen(QPen(QColor("#3a3a3a"), 1))
+        painter.setPen(QPen(QColor(Colors.BACKGROUND_MEDIUM), 1))
         painter.drawLine(0, 0, 0, self.height())
 
         # Font setup
@@ -452,9 +450,9 @@ class SplitVerticalToggleButton(QWidget):
         painter.rotate(-90)
 
         if self._hovered_zone == 'top':
-            painter.setPen(QColor("#ffffff"))
+            painter.setPen(QColor(Colors.TEXT_PRIMARY))
         else:
-            painter.setPen(QColor("#888888"))
+            painter.setPen(QColor(Colors.TEXT_MUTED))
 
         # Arrow indicates action: collapsed shows expand arrow, expanded shows collapse
         if self._state == self.STATE_COLLAPSED:
@@ -473,11 +471,11 @@ class SplitVerticalToggleButton(QWidget):
         painter.rotate(-90)
 
         if self._hovered_zone == 'bottom':
-            painter.setPen(QColor("#ffffff"))
+            painter.setPen(QColor(Colors.TEXT_PRIMARY))
         elif self._state == self.STATE_FULL:
-            painter.setPen(QColor("#e67e22"))  # Orange when full
+            painter.setPen(QColor(Colors.ACCENT_PRIMARY))  # Orange when full
         else:
-            painter.setPen(QColor("#888888"))
+            painter.setPen(QColor(Colors.TEXT_MUTED))
 
         # Show grid icon/text - use same arrow style as top zone (rotated -90°)
         if self._state == self.STATE_FULL:
@@ -538,12 +536,12 @@ class HorizontalToggleButton(QWidget):
 
         # Background
         if self._hovered:
-            painter.fillRect(self.rect(), QColor("#3a3a3a"))
+            painter.fillRect(self.rect(), QColor(Colors.BACKGROUND_MEDIUM))
         else:
-            painter.fillRect(self.rect(), QColor("#2a2a2a"))
+            painter.fillRect(self.rect(), QColor(Colors.BACKGROUND_DARK))
 
         # Top border
-        painter.setPen(QPen(QColor("#3a3a3a"), 1))
+        painter.setPen(QPen(QColor(Colors.BACKGROUND_MEDIUM), 1))
         painter.drawLine(0, 0, self.width(), 0)
 
         # Text styling
@@ -554,9 +552,9 @@ class HorizontalToggleButton(QWidget):
         painter.setFont(font)
 
         if self._hovered:
-            painter.setPen(QColor("#ffffff"))
+            painter.setPen(QColor(Colors.TEXT_PRIMARY))
         else:
-            painter.setPen(QColor("#888888"))
+            painter.setPen(QColor(Colors.TEXT_MUTED))
 
         # Arrow: collapsed=▲ (expand up), expanded=▼ (collapse down)
         arrow = '▲' if self._collapsed else '▼'

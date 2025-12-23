@@ -366,11 +366,23 @@ class PresetBar(QScrollArea):
     def setFixedWidth(self, width: int):
         """Override to track available width for grid layout."""
         super().setFixedWidth(width)
-        self._available_width = width - 15  # Account for scrollbar and margins
-        if hasattr(self, 'container'):
-            self.container.setFixedWidth(self._available_width)
-            if self._grid_mode:
-                self._reorder_thumbnails()
+        self._update_available_width(width)
+
+    def resizeEvent(self, event):
+        """Handle resize to update grid layout when using Expanding policy."""
+        super().resizeEvent(event)
+        self._update_available_width(event.size().width())
+
+    def _update_available_width(self, width: int):
+        """Update available width and reflow grid if needed."""
+        new_available = width - 15  # Account for scrollbar and margins
+        old_available = getattr(self, '_available_width', None)
+        if new_available != old_available:
+            self._available_width = new_available
+            if hasattr(self, 'container'):
+                self.container.setFixedWidth(self._available_width)
+                if self._grid_mode:
+                    self._reorder_thumbnails()
 
     def _setup_thumbnails(self):
         """Create thumbnail items for all presets."""

@@ -16,6 +16,7 @@ import cv2
 
 import storage
 from processing import load_image, RAW_EXTENSIONS
+from ui_constants import Colors, Styles
 
 
 class ThumbnailLoaderWorker(QObject):
@@ -82,7 +83,7 @@ class ThumbnailItem(QLabel):
         self._has_processed_image = False  # Track if updated by processing
         self.setFixedSize(104, 78)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("QLabel { background-color: #2a2a2a; border: 2px solid #444; }")
+        self.setStyleSheet(Styles.THUMBNAIL_DEFAULT)
         self.setCursor(Qt.PointingHandCursor)
 
         # Favorite star label (top-right corner overlay)
@@ -146,9 +147,9 @@ class ThumbnailItem(QLabel):
 
     def set_selected(self, selected: bool):
         if selected:
-            self.setStyleSheet("QLabel { background-color: #2a2a2a; border: 2px solid #e67e22; }")
+            self.setStyleSheet(Styles.THUMBNAIL_SELECTED)
         else:
-            self.setStyleSheet("QLabel { background-color: #2a2a2a; border: 2px solid #444; }")
+            self.setStyleSheet(Styles.THUMBNAIL_DEFAULT)
 
     def set_favorite(self, is_favorite: bool):
         """Set the favorite state and update the star display."""
@@ -164,15 +165,7 @@ class ThumbnailItem(QLabel):
 
     def _update_star_style(self):
         """Update star label appearance."""
-        self._star_label.setStyleSheet("""
-            QLabel {
-                background-color: rgba(0, 0, 0, 0.6);
-                color: #f1c40f;
-                border: none;
-                border-radius: 3px;
-                font-size: 12px;
-            }
-        """)
+        self._star_label.setStyleSheet(Styles.FAVORITE_STAR)
 
 
 class ThumbnailBar(QWidget):
@@ -192,7 +185,7 @@ class ThumbnailBar(QWidget):
         # Header with favorites toggle button
         header = QWidget()
         header.setFixedHeight(32)
-        header.setStyleSheet("background-color: #3a3a3a;")
+        header.setStyleSheet(f"background-color: {Colors.BACKGROUND_MEDIUM};")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(5, 4, 5, 4)
 
@@ -212,7 +205,7 @@ class ThumbnailBar(QWidget):
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self._scroll.setWidgetResizable(True)
-        self._scroll.setStyleSheet("QScrollArea { border: none; background-color: #3a3a3a; }")
+        self._scroll.setStyleSheet(Styles.SCROLL_AREA_DARK)
 
         self.container = QWidget()
         self.container.setFixedWidth(110)
@@ -333,33 +326,9 @@ class ThumbnailBar(QWidget):
     def _update_favorites_btn_style(self):
         """Update favorites button appearance."""
         if self._favorites_btn.isChecked():
-            self._favorites_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #f1c40f;
-                    color: #1a1a1a;
-                    border: none;
-                    border-radius: 4px;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #f39c12;
-                }
-            """)
+            self._favorites_btn.setStyleSheet(Styles.FAVORITE_BUTTON_ACTIVE)
         else:
-            self._favorites_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #333;
-                    color: #888;
-                    border: none;
-                    border-radius: 4px;
-                    font-size: 14px;
-                }
-                QPushButton:hover {
-                    background-color: #444;
-                    color: #f1c40f;
-                }
-            """)
+            self._favorites_btn.setStyleSheet(Styles.FAVORITE_BUTTON_INACTIVE)
 
     def _apply_filter(self):
         """Show/hide thumbnails based on favorites filter."""

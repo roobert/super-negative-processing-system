@@ -17,6 +17,7 @@ from scipy.interpolate import PchipInterpolator
 import storage
 import presets
 from state import TransformState
+from ui_constants import Colors, get_accent_button_style, get_danger_button_style
 from widgets.controls import SliderWithButtons
 
 
@@ -64,7 +65,7 @@ class CurvesWidget(QWidget):
         self._channel_group = QButtonGroup(self)
 
         channels = [('RGB', 'rgb'), ('R', 'r'), ('G', 'g'), ('B', 'b')]
-        colors = ['#888', '#ff6666', '#66ff66', '#6666ff']
+        colors = [Colors.CHANNEL_RGB, Colors.CHANNEL_RED, Colors.CHANNEL_GREEN, Colors.CHANNEL_BLUE]
 
         for i, (label, channel) in enumerate(channels):
             btn = QPushButton(label)
@@ -231,8 +232,7 @@ class CurvesWidget(QWidget):
                 self._reset_channel_btn.setStyleSheet("")
                 self._reset_channel_btn.setToolTip(f"At default: {curve_desc(current)}")
             else:
-                self._reset_channel_btn.setStyleSheet(
-                    "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+                self._reset_channel_btn.setStyleSheet(get_accent_button_style())
                 self._reset_channel_btn.setToolTip(f"Reset → {curve_desc(identity)}")
         elif at_absolute and at_preset:
             # At both defaults (they're equal) - no reset needed
@@ -240,18 +240,15 @@ class CurvesWidget(QWidget):
             self._reset_channel_btn.setToolTip(f"At default: {curve_desc(current)}")
         elif at_preset and not at_absolute:
             # Orange: at preset default, can go to absolute
-            self._reset_channel_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self._reset_channel_btn.setStyleSheet(get_accent_button_style())
             self._reset_channel_btn.setToolTip(f"Reset to absolute → {curve_desc(identity)}")
         elif at_absolute and not at_preset:
             # Blue: at absolute default, can go to preset
-            self._reset_channel_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self._reset_channel_btn.setStyleSheet(get_accent_button_style())
             self._reset_channel_btn.setToolTip(f"Reset to preset → {curve_desc(preset_curve)}")
         else:
             # Red: tweaked away from preset, can go to preset
-            self._reset_channel_btn.setStyleSheet(
-                "QPushButton { background-color: #e74c3c; color: white; font-weight: bold; }")
+            self._reset_channel_btn.setStyleSheet(get_danger_button_style())
             self._reset_channel_btn.setToolTip(f"Reset to preset → {curve_desc(preset_curve)}")
 
     def _update_reset_all_button_style(self):
@@ -262,8 +259,7 @@ class CurvesWidget(QWidget):
             for pts in self._curves.values()
         )
         if any_modified:
-            self._reset_all_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self._reset_all_btn.setStyleSheet(get_accent_button_style())
             self._reset_all_btn.setToolTip("Reset all curves to identity (some curves modified)")
         else:
             self._reset_all_btn.setStyleSheet("")
@@ -1557,6 +1553,10 @@ class AdjustmentsView(QWidget):
         """Toggle the preset panel visibility (for keyboard shortcut)."""
         self._preset_panel.toggle()
 
+    def toggle_preset_grid(self):
+        """Toggle the preset panel grid mode (for keyboard shortcut)."""
+        self._preset_panel.toggle_grid_mode()
+
     def _on_preset_full_mode_changed(self, is_full: bool):
         """Handle preset panel entering/exiting full mode."""
         if is_full:
@@ -1571,8 +1571,7 @@ class AdjustmentsView(QWidget):
     def toggle_adjustments_panel(self):
         """Toggle the adjustments panel visibility (for keyboard shortcut)."""
         self._adjustments_panel.toggle()
-        # Update preset panel full width after toggle animation
-        QTimer.singleShot(300, self._update_preset_full_width)
+        self._update_preset_full_width()
 
     def apply_preset_by_number(self, number: int):
         """Apply a preset by its shortcut number (1-9)."""

@@ -48,6 +48,7 @@ from widgets.adjustments import (
 
 # Collapsible panels
 from widgets.panels import (
+    BaseCollapsiblePanel,
     TransformControlsWidget,
     CollapsibleTransformPanel,
     CollapsiblePresetPanel,
@@ -83,6 +84,7 @@ __all__ = [
     'AdjustmentsPreview',
     'AdjustmentsView',
     # Collapsible panels
+    'BaseCollapsiblePanel',
     'TransformControlsWidget',
     'CollapsibleTransformPanel',
     'CollapsiblePresetPanel',

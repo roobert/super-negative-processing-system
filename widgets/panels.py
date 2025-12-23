@@ -2,19 +2,174 @@
 SUPER NEGATIVE PROCESSING SYSTEM - Collapsible Panels
 
 Collapsible panel containers for transform controls, presets, adjustments, debug, etc.
+
+Architecture:
+- BaseCollapsiblePanel: Abstract base providing animation and toggle logic
+- Concrete panels override: _get_initial_state(), _save_state(), _setup_content(), tooltips
 """
 
+from abc import abstractmethod
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGroupBox,
     QCheckBox, QComboBox, QSlider, QSizePolicy, QStackedWidget, QTabBar
 )
-from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, Signal
 
 import storage
 from state import TransformState
+from ui_constants import Colors, Dimensions, Styles, get_accent_button_style
 from widgets.controls import VerticalToggleButton, SplitVerticalToggleButton, HorizontalToggleButton
 from widgets.preset_bar import PresetBar
 from widgets.image_panel import ImagePanel, BaseSelectionWidget
+
+
+class BaseCollapsiblePanel(QWidget):
+    """Abstract base class for collapsible panels with slide animation.
+
+    Provides common animation, toggle, and state management logic.
+    Subclasses must implement:
+    - _get_initial_expanded_state() -> bool
+    - _save_expanded_state(expanded: bool)
+    - _setup_content() -> QWidget
+    - _create_toggle_button() -> QWidget
+    - _get_expanded_tooltip() -> str
+    - _get_collapsed_tooltip() -> str
+    """
+
+    visibilityChanged = Signal(bool)
+
+    # Subclasses should override these
+    EXPANDED_WIDTH = 280
+    COLLAPSED_WIDTH = 28
+
+    def __init__(self, toggle_on_left: bool = False):
+        """
+        Args:
+            toggle_on_left: If True, toggle button is on left side of content.
+                           If False, toggle button is on right side.
+        """
+        super().__init__()
+        self._toggle_on_left = toggle_on_left
+        self._expanded = self._get_initial_expanded_state()
+        self._content = None
+        self._toggle_btn = None
+
+        self._setup_ui()
+        self._apply_state_immediate()
+
+    @abstractmethod
+    def _get_initial_expanded_state(self) -> bool:
+        """Load and return initial expanded state from storage."""
+        pass
+
+    @abstractmethod
+    def _save_expanded_state(self, expanded: bool):
+        """Save expanded state to storage."""
+        pass
+
+    @abstractmethod
+    def _setup_content(self) -> QWidget:
+        """Create and return the content widget."""
+        pass
+
+    @abstractmethod
+    def _create_toggle_button(self) -> QWidget:
+        """Create and return the toggle button widget."""
+        pass
+
+    @abstractmethod
+    def _get_expanded_tooltip(self) -> str:
+        """Return tooltip text when panel is expanded."""
+        pass
+
+    @abstractmethod
+    def _get_collapsed_tooltip(self) -> str:
+        """Return tooltip text when panel is collapsed."""
+        pass
+
+    def _setup_ui(self):
+        """Set up the panel layout with toggle button and content."""
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._content = self._setup_content()
+        self._toggle_btn = self._create_toggle_button()
+        self._toggle_btn.clicked.connect(self.toggle)
+
+        if self._toggle_on_left:
+            layout.addWidget(self._toggle_btn)
+            layout.addWidget(self._content)
+        else:
+            layout.addWidget(self._content)
+            layout.addWidget(self._toggle_btn)
+
+        # Set explicit size policy for predictable layout behavior
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+
+    def toggle(self):
+        """Toggle the panel open/closed."""
+        if self._expanded:
+            self._collapse()
+        else:
+            self._expand()
+
+    def _expand(self):
+        """Expand the panel."""
+        self._expanded = True
+        self._save_expanded_state(True)
+        self._content.setFixedWidth(self.EXPANDED_WIDTH)
+        self._content.show()
+        self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
+        self._toggle_btn.set_collapsed(False)
+        self._toggle_btn.setToolTip(self._get_expanded_tooltip())
+        # Force parent to update layout
+        if self.parentWidget():
+            self.parentWidget().updateGeometry()
+            self.parentWidget().update()
+        self.visibilityChanged.emit(True)
+
+    def _collapse(self):
+        """Collapse the panel."""
+        self._expanded = False
+        self._save_expanded_state(False)
+        self._content.setFixedWidth(0)
+        self._content.hide()
+        self.setFixedWidth(self.COLLAPSED_WIDTH)
+        self._toggle_btn.set_collapsed(True)
+        self._toggle_btn.setToolTip(self._get_collapsed_tooltip())
+        # Force parent to update layout
+        if self.parentWidget():
+            self.parentWidget().updateGeometry()
+            self.parentWidget().update()
+        self.visibilityChanged.emit(False)
+
+    def _apply_state_immediate(self):
+        """Apply current state."""
+        if self._expanded:
+            self._content.setFixedWidth(self.EXPANDED_WIDTH)
+            self._content.show()
+            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
+            self._toggle_btn.set_collapsed(False)
+            self._toggle_btn.setToolTip(self._get_expanded_tooltip())
+        else:
+            self._content.setFixedWidth(0)
+            self._content.hide()
+            self.setFixedWidth(self.COLLAPSED_WIDTH)
+            self._toggle_btn.set_collapsed(True)
+            self._toggle_btn.setToolTip(self._get_collapsed_tooltip())
+
+    def is_expanded(self) -> bool:
+        """Return whether the panel is currently expanded."""
+        return self._expanded
+
+    def set_expanded(self, expanded: bool):
+        """Set the panel state without animation."""
+        if expanded == self._expanded:
+            return
+        self._expanded = expanded
+        self._apply_state_immediate()
+        self.visibilityChanged.emit(expanded)
 
 
 class TransformControlsWidget(QWidget):
@@ -237,8 +392,7 @@ class TransformControlsWidget(QWidget):
         if value is None:
             value = self.fine_rotation_slider.value() / 10.0
         if abs(value) > 0.05:  # Not at default (0)
-            self.reset_fine_rotation_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self.reset_fine_rotation_btn.setStyleSheet(get_accent_button_style())
             self.reset_fine_rotation_btn.setToolTip(f"Reset fine rotation to 0° (currently {value:.1f}°)")
         else:
             self.reset_fine_rotation_btn.setStyleSheet("")
@@ -277,8 +431,7 @@ class TransformControlsWidget(QWidget):
         """Update crop reset button style based on adjustment values."""
         has_adjustment = any(v != 0 for v in adjustment.values())
         if has_adjustment:
-            self.reset_crop_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self.reset_crop_btn.setStyleSheet(get_accent_button_style())
             self.reset_crop_btn.setToolTip(f"Reset crop (L:{adjustment.get('left', 0)} T:{adjustment.get('top', 0)} R:{adjustment.get('right', 0)} B:{adjustment.get('bottom', 0)})")
         else:
             self.reset_crop_btn.setStyleSheet("")
@@ -524,8 +677,7 @@ class CollapsibleTransformPanel(QWidget):
         if value is None:
             value = self.fine_rotation_slider.value() / 10.0
         if abs(value) > 0.05:  # Not at default (0)
-            self.reset_fine_rotation_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self.reset_fine_rotation_btn.setStyleSheet(get_accent_button_style())
             self.reset_fine_rotation_btn.setToolTip(f"Reset fine rotation to 0° (currently {value:.1f}°)")
         else:
             self.reset_fine_rotation_btn.setStyleSheet("")
@@ -535,8 +687,7 @@ class CollapsibleTransformPanel(QWidget):
         """Update crop reset button style based on adjustment values."""
         has_adjustment = any(v != 0 for v in adjustment.values())
         if has_adjustment:
-            self.reset_crop_btn.setStyleSheet(
-                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }")
+            self.reset_crop_btn.setStyleSheet(get_accent_button_style())
             self.reset_crop_btn.setToolTip(f"Reset crop (L:{adjustment.get('left', 0)} T:{adjustment.get('top', 0)} R:{adjustment.get('right', 0)} B:{adjustment.get('bottom', 0)})")
         else:
             self.reset_crop_btn.setStyleSheet("")
@@ -563,7 +714,6 @@ class CollapsiblePresetPanel(QWidget):
 
     EXPANDED_WIDTH = 280  # Normal expanded width
     COLLAPSED_WIDTH = 28  # Width of toggle button strip
-    ANIMATION_DURATION = 250  # milliseconds
 
     def __init__(self):
         super().__init__()
@@ -580,8 +730,6 @@ class CollapsiblePresetPanel(QWidget):
             if store.get_preset_panel_expanded():
                 self._state = self.STATE_EXPANDED
         self._setup_ui()
-        self._setup_animation()
-        # Apply initial state without animation
         self._apply_state_immediate()
 
     def _setup_ui(self):
@@ -604,35 +752,28 @@ class CollapsiblePresetPanel(QWidget):
         # Set initial size
         self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
 
-    def _setup_animation(self):
-        self._animation = QPropertyAnimation(self, b"maximumWidth")
-        self._animation.setDuration(self.ANIMATION_DURATION)
-        self._animation.setEasingCurve(QEasingCurve.OutCubic)
-        self._animation.finished.connect(self._on_animation_finished)
-
     def set_full_width(self, width: int):
         """Set the width to use when in full expanded mode."""
         self._full_width = width
-        # If currently in full mode, update size
-        if self._state == self.STATE_FULL:
-            self.setFixedWidth(width)
-            self._preset_bar.setFixedWidth(width - self.COLLAPSED_WIDTH)
+        # In full mode, both panel and preset_bar use Expanding policy
+        # so we don't need to set fixed widths - the layout handles it
 
     def toggle(self):
         """Toggle between collapsed and normal expanded (for keyboard shortcut)."""
-        if self._animation.state() == QPropertyAnimation.Running:
-            return
-
         if self._state == self.STATE_COLLAPSED:
             self._expand_normal()
         else:
             self._collapse()
 
+    def toggle_grid_mode(self):
+        """Toggle to/from grid (full) mode (for keyboard shortcut)."""
+        if self._state == self.STATE_FULL:
+            self._collapse()
+        else:
+            self._expand_full()
+
     def _on_top_clicked(self):
         """Handle top zone click - toggle collapsed/normal expanded."""
-        if self._animation.state() == QPropertyAnimation.Running:
-            return
-
         if self._state == self.STATE_COLLAPSED:
             self._expand_normal()
         else:
@@ -640,9 +781,6 @@ class CollapsiblePresetPanel(QWidget):
 
     def _on_bottom_clicked(self):
         """Handle bottom zone click - toggle to/from full expanded."""
-        if self._animation.state() == QPropertyAnimation.Running:
-            return
-
         if self._state == self.STATE_FULL:
             self._collapse()
         else:
@@ -652,15 +790,15 @@ class CollapsiblePresetPanel(QWidget):
         """Expand to normal width with list view."""
         self._state = self.STATE_EXPANDED
         storage.get_storage().set_preset_panel_expanded(True)
-        target_width = self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH
 
-        # Switch to list layout
+        # Switch to list layout with fixed sizes
         self._preset_bar.set_grid_mode(False)
+        self._preset_bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self._preset_bar.setFixedWidth(self.EXPANDED_WIDTH)
+        self._preset_bar.show()
 
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(target_width)
-        self._animation.start()
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
 
         self._toggle_btn.set_state(SplitVerticalToggleButton.STATE_EXPANDED)
         self.visibilityChanged.emit(True)
@@ -675,16 +813,18 @@ class CollapsiblePresetPanel(QWidget):
         if not was_full:
             self.fullModeChanged.emit(True)
 
-        # Now use the updated full_width
-        target_width = self._full_width
-
         # Switch to grid layout
         self._preset_bar.set_grid_mode(True)
-        self._preset_bar.setFixedWidth(target_width - self.COLLAPSED_WIDTH)
+        # Let preset bar expand with panel - set min but not max
+        self._preset_bar.setMinimumWidth(100)
+        self._preset_bar.setMaximumWidth(16777215)
+        self._preset_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(target_width)
-        self._animation.start()
+        # In full mode, allow expansion
+        self.setMinimumWidth(self.COLLAPSED_WIDTH + 100)
+        self.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._preset_bar.show()
 
         self._toggle_btn.set_state(SplitVerticalToggleButton.STATE_FULL)
         self.visibilityChanged.emit(True)
@@ -695,77 +835,52 @@ class CollapsiblePresetPanel(QWidget):
         self._state = self.STATE_COLLAPSED
         storage.get_storage().set_preset_panel_expanded(False)
 
-        # If coming from full mode, first fix the width so animation works
         if was_full:
-            current_width = self.width()
-            self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-            self.setFixedWidth(current_width)
             self.fullModeChanged.emit(False)
 
-        # Switch back to list layout
+        # Switch back to list layout with fixed sizes
         self._preset_bar.set_grid_mode(False)
+        self._preset_bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self._preset_bar.hide()
 
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(self.COLLAPSED_WIDTH)
-        self._animation.start()
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self.setFixedWidth(self.COLLAPSED_WIDTH)
 
         self._toggle_btn.set_state(SplitVerticalToggleButton.STATE_COLLAPSED)
         self.visibilityChanged.emit(False)
 
     def _apply_state_immediate(self):
-        """Apply current state without animation."""
+        """Apply current state."""
         if self._state == self.STATE_FULL:
-            # In full mode, allow expansion
+            # In full mode, allow expansion for both panel and preset bar
+            self._preset_bar.setMinimumWidth(100)
+            self._preset_bar.setMaximumWidth(16777215)
+            self._preset_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            self._preset_bar.set_grid_mode(True)
+            self._preset_bar.show()
             self.setMinimumWidth(self.COLLAPSED_WIDTH + 100)
             self.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            self._preset_bar.set_grid_mode(True)
-            self._preset_bar.show()
             self._toggle_btn.set_state(SplitVerticalToggleButton.STATE_FULL)
-            # Width will be set by layout, then resizeEvent updates preset bar
         elif self._state == self.STATE_EXPANDED:
-            self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
+            self._preset_bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
             self._preset_bar.setFixedWidth(self.EXPANDED_WIDTH)
             self._preset_bar.set_grid_mode(False)
             self._preset_bar.show()
-            self._toggle_btn.set_state(SplitVerticalToggleButton.STATE_EXPANDED)
-        else:
-            self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._preset_bar.hide()
-            self._toggle_btn.set_state(SplitVerticalToggleButton.STATE_COLLAPSED)
-
-    def _on_animation_finished(self):
-        """Handle animation completion."""
-        if self._state == self.STATE_FULL:
-            # In full mode, remove fixed width and let layout expand the panel
-            self.setMinimumWidth(self.COLLAPSED_WIDTH + 100)
-            self.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX - allow expansion
-            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            self._preset_bar.show()
-            # Update preset bar to match current width
-            self._update_preset_bar_width()
-        elif self._state == self.STATE_EXPANDED:
             self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
             self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._preset_bar.show()
+            self._toggle_btn.set_state(SplitVerticalToggleButton.STATE_EXPANDED)
         else:
+            self._preset_bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+            self._preset_bar.hide()
             self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
             self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._preset_bar.hide()
+            self._toggle_btn.set_state(SplitVerticalToggleButton.STATE_COLLAPSED)
 
     def resizeEvent(self, event):
-        """Handle resize - update preset bar width in full mode."""
+        """Handle resize."""
         super().resizeEvent(event)
-        if self._state == self.STATE_FULL:
-            self._update_preset_bar_width()
-
-    def _update_preset_bar_width(self):
-        """Update preset bar width to match panel width."""
-        bar_width = self.width() - self.COLLAPSED_WIDTH
-        if bar_width > 0:
-            self._preset_bar.setFixedWidth(bar_width)
+        # In full mode, preset_bar uses Expanding policy so no manual width update needed
 
     def is_expanded(self) -> bool:
         """Return whether the panel is currently expanded (normal or full)."""
@@ -825,174 +940,74 @@ class CollapsiblePresetPanel(QWidget):
         return self._preset_bar
 
 
-class CollapsibleAdjustmentsPanel(QWidget):
+class CollapsibleAdjustmentsPanel(BaseCollapsiblePanel):
     """A collapsible container for the adjustments controls with slide animation."""
 
-    visibilityChanged = Signal(bool)  # Emitted when panel is shown/hidden
-
     EXPANDED_WIDTH = 320
-    COLLAPSED_WIDTH = 28  # Width of toggle button strip
-    ANIMATION_DURATION = 250  # milliseconds
 
     def __init__(self, content_widget: QWidget):
         """
         Args:
             content_widget: The widget to show/hide (scroll area with controls)
         """
-        super().__init__()
-        self._content = content_widget
-        # Determine initial state based on startup behavior setting
+        self._content_widget = content_widget
+        super().__init__(toggle_on_left=True)  # Toggle button on left
+
+    def _get_initial_expanded_state(self) -> bool:
         store = storage.get_storage()
         behavior = store.get_adjustments_panel_startup_behavior()
         if behavior == 'expanded':
-            self._expanded = True
+            return True
         elif behavior == 'collapsed':
-            self._expanded = False
-        else:  # 'last' - use saved state
-            self._expanded = store.get_adjustments_panel_expanded()
-        self._setup_ui()
-        self._setup_animation()
-        # Apply initial state without animation
-        self._apply_state_immediate()
+            return False
+        else:  # 'last'
+            return store.get_adjustments_panel_expanded()
 
-    def _setup_ui(self):
-        # Main horizontal layout: toggle button + content
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+    def _save_expanded_state(self, expanded: bool):
+        storage.get_storage().set_adjustments_panel_expanded(expanded)
 
-        # Vertical toggle button on the left edge (since panel is on right side)
-        self._toggle_btn = VerticalToggleButton("ADJUSTMENTS", side="left")
-        self._toggle_btn.setToolTip("Toggle adjustments panel (A)")
-        self._toggle_btn.clicked.connect(self.toggle)
-        layout.addWidget(self._toggle_btn)
+    def _setup_content(self) -> QWidget:
+        return self._content_widget
 
-        # The content (scroll area with controls)
-        layout.addWidget(self._content)
+    def _create_toggle_button(self) -> QWidget:
+        return VerticalToggleButton("ADJUSTMENTS", side="left")
 
-        # Set initial size
-        self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
+    def _get_expanded_tooltip(self) -> str:
+        return "Hide adjustments panel (A)"
 
-    def _setup_animation(self):
-        self._animation = QPropertyAnimation(self, b"maximumWidth")
-        self._animation.setDuration(self.ANIMATION_DURATION)
-        self._animation.setEasingCurve(QEasingCurve.OutCubic)
-        self._animation.finished.connect(self._on_animation_finished)
-
-    def toggle(self):
-        """Toggle the panel open/closed."""
-        if self._animation.state() == QPropertyAnimation.Running:
-            return  # Don't interrupt ongoing animation
-
-        if self._expanded:
-            self._collapse()
-        else:
-            self._expand()
-
-    def _expand(self):
-        """Slide the panel open."""
-        self._expanded = True
-        storage.get_storage().set_adjustments_panel_expanded(True)
-        target_width = self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH
-
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(target_width)
-        self._animation.start()
-
-        self._toggle_btn.set_collapsed(False)
-        self._toggle_btn.setToolTip("Hide adjustments panel (A)")
-        self.visibilityChanged.emit(True)
-
-    def _collapse(self):
-        """Slide the panel closed."""
-        self._expanded = False
-        storage.get_storage().set_adjustments_panel_expanded(False)
-
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(self.COLLAPSED_WIDTH)
-        self._animation.start()
-
-        self._toggle_btn.set_collapsed(True)
-        self._toggle_btn.setToolTip("Show adjustments panel (A)")
-        self.visibilityChanged.emit(False)
-
-    def _apply_state_immediate(self):
-        """Apply current expanded state without animation."""
-        if self._expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content.show()
-            self._toggle_btn.set_collapsed(False)
-            self._toggle_btn.setToolTip("Hide adjustments panel (A)")
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content.hide()
-            self._toggle_btn.set_collapsed(True)
-            self._toggle_btn.setToolTip("Show adjustments panel (A)")
-
-    def _on_animation_finished(self):
-        """Handle animation completion."""
-        if self._expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content.show()
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content.hide()
-
-    def is_expanded(self) -> bool:
-        """Return whether the panel is currently expanded."""
-        return self._expanded
-
-    def set_expanded(self, expanded: bool):
-        """Set the panel state without animation."""
-        if expanded == self._expanded:
-            return
-
-        self._expanded = expanded
-        if expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content.show()
-            self._toggle_btn.set_collapsed(False)
-            self._toggle_btn.setToolTip("Hide adjustments panel (A)")
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content.hide()
-            self._toggle_btn.set_collapsed(True)
-            self._toggle_btn.setToolTip("Show adjustments panel (A)")
-        self.visibilityChanged.emit(expanded)
+    def _get_collapsed_tooltip(self) -> str:
+        return "Show adjustments panel (A)"
 
 
-class CollapsibleDebugPanel(QWidget):
-    """A collapsible container for detection debug panels (right sidebar)."""
-
-    visibilityChanged = Signal(bool)
+class CollapsibleDebugPanel(BaseCollapsiblePanel):
+    """A collapsible container for detection debug panels (left sidebar)."""
 
     EXPANDED_WIDTH = 280
-    COLLAPSED_WIDTH = 28
-    ANIMATION_DURATION = 250
 
     def __init__(self):
-        super().__init__()
-        # Determine initial state based on startup behavior setting
+        # These will be set during _setup_content, before base __init__ completes
+        self.panel_negative = None
+        self.panel_base = None
+        self.panel_edges = None
+        self.panel_extracted = None
+        super().__init__(toggle_on_left=False)  # Toggle button on right
+
+    def _get_initial_expanded_state(self) -> bool:
         store = storage.get_storage()
         behavior = store.get_debug_panel_startup_behavior()
         if behavior == 'expanded':
-            self._expanded = True
+            return True
         elif behavior == 'collapsed':
-            self._expanded = False
-        else:  # 'last' - use saved state
-            self._expanded = store.get_debug_panel_expanded()
-        self._setup_ui()
-        self._setup_animation()
-        self._apply_state_immediate()
+            return False
+        else:  # 'last'
+            return store.get_debug_panel_expanded()
 
-    def _setup_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+    def _save_expanded_state(self, expanded: bool):
+        storage.get_storage().set_debug_panel_expanded(expanded)
 
-        # Content area with stacked panels
-        self._content = QWidget()
-        content_layout = QVBoxLayout(self._content)
+    def _setup_content(self) -> QWidget:
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(5, 5, 5, 5)
         content_layout.setSpacing(5)
 
@@ -1008,15 +1023,7 @@ class CollapsibleDebugPanel(QWidget):
         content_layout.addWidget(self._wrap_panel("3. Edge Detection", self.panel_edges))
         content_layout.addWidget(self._wrap_panel("4. Extracted Frame", self.panel_extracted))
 
-        layout.addWidget(self._content)
-
-        # Toggle button on right edge (panel is on left side of main layout)
-        self._toggle_btn = VerticalToggleButton("DEBUG")
-        self._toggle_btn.setToolTip("Toggle debug panels (` or §)")
-        self._toggle_btn.clicked.connect(self.toggle)
-        layout.addWidget(self._toggle_btn)
-
-        self.setFixedWidth(self.COLLAPSED_WIDTH)
+        return content
 
     def _wrap_panel(self, title: str, panel: QWidget) -> QWidget:
         group = QGroupBox(title)
@@ -1025,174 +1032,64 @@ class CollapsibleDebugPanel(QWidget):
         group_layout.addWidget(panel)
         return group
 
-    def _setup_animation(self):
-        self._animation = QPropertyAnimation(self, b"maximumWidth")
-        self._animation.setDuration(self.ANIMATION_DURATION)
-        self._animation.setEasingCurve(QEasingCurve.OutCubic)
-        self._animation.finished.connect(self._on_animation_finished)
+    def _create_toggle_button(self) -> QWidget:
+        return VerticalToggleButton("DEBUG")
 
-    def toggle(self):
-        if self._animation.state() == QPropertyAnimation.Running:
-            return
-        if self._expanded:
-            self._collapse()
-        else:
-            self._expand()
+    def _get_expanded_tooltip(self) -> str:
+        return "Hide debug panels (` or §)"
 
-    def _expand(self):
-        self._expanded = True
-        storage.get_storage().set_debug_panel_expanded(True)
-        target_width = self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(target_width)
-        self._animation.start()
-        self._toggle_btn.set_collapsed(False)
-        self._toggle_btn.setToolTip("Hide debug panels (` or §)")
-        self.visibilityChanged.emit(True)
-
-    def _collapse(self):
-        self._expanded = False
-        storage.get_storage().set_debug_panel_expanded(False)
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(self.COLLAPSED_WIDTH)
-        self._animation.start()
-        self._toggle_btn.set_collapsed(True)
-        self._toggle_btn.setToolTip("Show debug panels (` or §)")
-        self.visibilityChanged.emit(False)
-
-    def _apply_state_immediate(self):
-        if self._expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content.show()
-            self._toggle_btn.set_collapsed(False)
-            self._toggle_btn.setToolTip("Hide debug panels (` or §)")
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content.hide()
-            self._toggle_btn.set_collapsed(True)
-            self._toggle_btn.setToolTip("Show debug panels (` or §)")
-
-    def _on_animation_finished(self):
-        if self._expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content.show()
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content.hide()
-
-    def is_expanded(self) -> bool:
-        return self._expanded
+    def _get_collapsed_tooltip(self) -> str:
+        return "Show debug panels (` or §)"
 
 
-class CollapsibleControlsPanel(QWidget):
-    """A collapsible container for controls sidebar (right side)."""
+class CollapsibleControlsPanel(BaseCollapsiblePanel):
+    """A collapsible container for controls sidebar (right side).
 
-    visibilityChanged = Signal(bool)
+    Content is set after construction via set_content().
+    """
 
-    EXPANDED_WIDTH = 320  # Match adjustments panel width
-    COLLAPSED_WIDTH = 28
-    ANIMATION_DURATION = 250
+    EXPANDED_WIDTH = 320
 
     def __init__(self):
-        super().__init__()
-        # Determine initial state based on startup behavior setting
+        self._content_widget = None  # Will be set via set_content()
+        super().__init__(toggle_on_left=True)  # Toggle button on left
+
+    def _get_initial_expanded_state(self) -> bool:
         store = storage.get_storage()
         behavior = store.get_controls_panel_startup_behavior()
         if behavior == 'expanded':
-            self._expanded = True
+            return True
         elif behavior == 'collapsed':
-            self._expanded = False
-        else:  # 'last' - use saved state
-            self._expanded = store.get_controls_panel_expanded()
-        self._content = None  # Will be set via set_content()
-        self._setup_ui()
-        self._setup_animation()
+            return False
+        else:  # 'last'
+            return store.get_controls_panel_expanded()
 
-    def _setup_ui(self):
-        self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(0)
+    def _save_expanded_state(self, expanded: bool):
+        storage.get_storage().set_controls_panel_expanded(expanded)
 
-        # Toggle button on left edge (panel is on right side of main layout)
-        self._toggle_btn = VerticalToggleButton("CONTROLS", side="left")
-        self._toggle_btn.setToolTip("Toggle controls panel (~ or ±)")
-        self._toggle_btn.clicked.connect(self.toggle)
-        self._layout.addWidget(self._toggle_btn)
-
-        # Content will be added via set_content()
-        self._content_container = QWidget()
-        self._content_layout = QVBoxLayout(self._content_container)
+    def _setup_content(self) -> QWidget:
+        # Create container - actual content added via set_content()
+        container = QWidget()
+        self._content_layout = QVBoxLayout(container)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.addWidget(self._content_container)
-
-        self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
+        return container
 
     def set_content(self, widget: QWidget):
         """Set the content widget for this panel."""
-        self._content = widget
+        self._content_widget = widget
         self._content_layout.addWidget(widget)
-        self._apply_state_immediate()
 
-    def _setup_animation(self):
-        self._animation = QPropertyAnimation(self, b"maximumWidth")
-        self._animation.setDuration(self.ANIMATION_DURATION)
-        self._animation.setEasingCurve(QEasingCurve.OutCubic)
-        self._animation.finished.connect(self._on_animation_finished)
+    def _create_toggle_button(self) -> QWidget:
+        return VerticalToggleButton("CONTROLS", side="left")
 
-    def toggle(self):
-        if self._animation.state() == QPropertyAnimation.Running:
-            return
-        if self._expanded:
-            self._collapse()
-        else:
-            self._expand()
+    def _get_expanded_tooltip(self) -> str:
+        return "Hide controls panel (~ or ±)"
 
-    def _expand(self):
-        self._expanded = True
-        storage.get_storage().set_controls_panel_expanded(True)
-        target_width = self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(target_width)
-        self._animation.start()
-        self._toggle_btn.set_collapsed(False)
-        self._toggle_btn.setToolTip("Hide controls panel (~ or ±)")
-        self.visibilityChanged.emit(True)
-
-    def _collapse(self):
-        self._expanded = False
-        storage.get_storage().set_controls_panel_expanded(False)
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(self.COLLAPSED_WIDTH)
-        self._animation.start()
-        self._toggle_btn.set_collapsed(True)
-        self._toggle_btn.setToolTip("Show controls panel (~ or ±)")
-        self.visibilityChanged.emit(False)
-
-    def _apply_state_immediate(self):
-        if self._expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content_container.show()
-            self._toggle_btn.set_collapsed(False)
-            self._toggle_btn.setToolTip("Hide controls panel (~ or ±)")
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content_container.hide()
-            self._toggle_btn.set_collapsed(True)
-            self._toggle_btn.setToolTip("Show controls panel (~ or ±)")
-
-    def _on_animation_finished(self):
-        if self._expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content_container.show()
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content_container.hide()
-
-    def is_expanded(self) -> bool:
-        return self._expanded
+    def _get_collapsed_tooltip(self) -> str:
+        return "Show controls panel (~ or ±)"
 
 
-class TabbedRightPanel(QWidget):
+class TabbedRightPanel(BaseCollapsiblePanel):
     """Collapsible right panel with tabbed content (Controls/Transform).
 
     This panel contains two tabs:
@@ -1200,13 +1097,9 @@ class TabbedRightPanel(QWidget):
     - Tab 1: Transform (rotation, grid, crop tools)
     """
 
-    visibilityChanged = Signal(bool)
     TAB_CONTROLS = 0
     TAB_TRANSFORM = 1
-
     EXPANDED_WIDTH = 320
-    COLLAPSED_WIDTH = 28
-    ANIMATION_DURATION = 250
 
     def __init__(self, panel_name: str, controls_widget: QWidget,
                  transform_widget: TransformControlsWidget,
@@ -1218,51 +1111,41 @@ class TabbedRightPanel(QWidget):
             transform_widget: Widget for the second tab (transform tools)
             storage_key: Key prefix for storage ('controls' or 'adjustments')
         """
-        super().__init__()
         self._panel_name = panel_name
         self._controls_widget = controls_widget
         self._transform_widget = transform_widget
         self._storage_key = storage_key
+        self._tab_bar = None
+        self._stack = None
+        super().__init__(toggle_on_left=True)  # Toggle button on left
 
-        # Determine initial state based on startup behavior setting
+    def _get_initial_expanded_state(self) -> bool:
         store = storage.get_storage()
-        if storage_key == "adjustments":
+        if self._storage_key == "adjustments":
             behavior = store.get_adjustments_panel_startup_behavior()
             if behavior == 'expanded':
-                self._expanded = True
+                return True
             elif behavior == 'collapsed':
-                self._expanded = False
-            else:
-                self._expanded = store.get_adjustments_panel_expanded()
+                return False
+            return store.get_adjustments_panel_expanded()
         else:  # controls
             behavior = store.get_controls_panel_startup_behavior()
             if behavior == 'expanded':
-                self._expanded = True
+                return True
             elif behavior == 'collapsed':
-                self._expanded = False
-            else:
-                self._expanded = store.get_controls_panel_expanded()
+                return False
+            return store.get_controls_panel_expanded()
 
-        self._setup_ui()
-        self._setup_animation()
-        self._apply_state_immediate()
+    def _save_expanded_state(self, expanded: bool):
+        store = storage.get_storage()
+        if self._storage_key == "adjustments":
+            store.set_adjustments_panel_expanded(expanded)
+        else:
+            store.set_controls_panel_expanded(expanded)
 
-    def _setup_ui(self):
-        # Main horizontal layout: toggle button + content
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Toggle button on left edge (panel is on right side)
-        self._toggle_btn = VerticalToggleButton(self._panel_name, side="left")
-        shortcut = "A" if self._storage_key == "adjustments" else "~ or ±"
-        self._toggle_btn.setToolTip(f"Toggle {self._panel_name.lower()} panel ({shortcut})")
-        self._toggle_btn.clicked.connect(self.toggle)
-        layout.addWidget(self._toggle_btn)
-
-        # Content area with tabs
-        self._content = QWidget()
-        content_layout = QVBoxLayout(self._content)
+    def _setup_content(self) -> QWidget:
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
@@ -1272,26 +1155,7 @@ class TabbedRightPanel(QWidget):
         self._tab_bar.addTab("Transform")
         self._tab_bar.setExpanding(False)
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
-        self._tab_bar.setStyleSheet("""
-            QTabBar {
-                background: transparent;
-            }
-            QTabBar::tab {
-                padding: 6px 16px;
-                margin: 0;
-                border: none;
-                background: #2a2a2a;
-                color: #888;
-            }
-            QTabBar::tab:selected {
-                background: #3a3a3a;
-                color: #fff;
-                border-bottom: 2px solid #e67e22;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #333;
-            }
-        """)
+        self._tab_bar.setStyleSheet(Styles.TAB_BAR)
         content_layout.addWidget(self._tab_bar)
 
         # Stacked widget for tab content
@@ -1300,97 +1164,22 @@ class TabbedRightPanel(QWidget):
         self._stack.addWidget(self._transform_widget)
         content_layout.addWidget(self._stack, 1)
 
-        layout.addWidget(self._content)
+        return content
 
-        # Set initial size
-        self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
+    def _create_toggle_button(self) -> QWidget:
+        return VerticalToggleButton(self._panel_name, side="left")
 
-    def _setup_animation(self):
-        self._animation = QPropertyAnimation(self, b"maximumWidth")
-        self._animation.setDuration(self.ANIMATION_DURATION)
-        self._animation.setEasingCurve(QEasingCurve.OutCubic)
-        self._animation.finished.connect(self._on_animation_finished)
+    def _get_expanded_tooltip(self) -> str:
+        shortcut = "A" if self._storage_key == "adjustments" else "~ or ±"
+        return f"Hide {self._panel_name.lower()} panel ({shortcut})"
+
+    def _get_collapsed_tooltip(self) -> str:
+        shortcut = "A" if self._storage_key == "adjustments" else "~ or ±"
+        return f"Show {self._panel_name.lower()} panel ({shortcut})"
 
     def _on_tab_changed(self, index: int):
         """Handle tab switch."""
         self._stack.setCurrentIndex(index)
-
-    def toggle(self):
-        """Toggle the panel open/closed."""
-        if self._animation.state() == QPropertyAnimation.Running:
-            return
-        if self._expanded:
-            self._collapse()
-        else:
-            self._expand()
-
-    def _expand(self):
-        self._expanded = True
-        store = storage.get_storage()
-        if self._storage_key == "adjustments":
-            store.set_adjustments_panel_expanded(True)
-        else:
-            store.set_controls_panel_expanded(True)
-
-        target_width = self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(target_width)
-        self._animation.start()
-
-        shortcut = "A" if self._storage_key == "adjustments" else "~ or ±"
-        self._toggle_btn.set_collapsed(False)
-        self._toggle_btn.setToolTip(f"Hide {self._panel_name.lower()} panel ({shortcut})")
-        self.visibilityChanged.emit(True)
-
-    def _collapse(self):
-        self._expanded = False
-        store = storage.get_storage()
-        if self._storage_key == "adjustments":
-            store.set_adjustments_panel_expanded(False)
-        else:
-            store.set_controls_panel_expanded(False)
-
-        self._animation.setStartValue(self.width())
-        self._animation.setEndValue(self.COLLAPSED_WIDTH)
-        self._animation.start()
-
-        shortcut = "A" if self._storage_key == "adjustments" else "~ or ±"
-        self._toggle_btn.set_collapsed(True)
-        self._toggle_btn.setToolTip(f"Show {self._panel_name.lower()} panel ({shortcut})")
-        self.visibilityChanged.emit(False)
-
-    def _apply_state_immediate(self):
-        """Apply current state without animation."""
-        shortcut = "A" if self._storage_key == "adjustments" else "~ or ±"
-        if self._expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content.show()
-            self._toggle_btn.set_collapsed(False)
-            self._toggle_btn.setToolTip(f"Hide {self._panel_name.lower()} panel ({shortcut})")
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content.hide()
-            self._toggle_btn.set_collapsed(True)
-            self._toggle_btn.setToolTip(f"Show {self._panel_name.lower()} panel ({shortcut})")
-
-    def _on_animation_finished(self):
-        if self._expanded:
-            self.setFixedWidth(self.EXPANDED_WIDTH + self.COLLAPSED_WIDTH)
-            self._content.show()
-        else:
-            self.setFixedWidth(self.COLLAPSED_WIDTH)
-            self._content.hide()
-
-    def is_expanded(self) -> bool:
-        return self._expanded
-
-    def set_expanded(self, expanded: bool):
-        """Set the panel state without animation."""
-        if expanded == self._expanded:
-            return
-        self._expanded = expanded
-        self._apply_state_immediate()
-        self.visibilityChanged.emit(expanded)
 
     def current_tab(self) -> int:
         """Return the current tab index."""

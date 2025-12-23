@@ -30,6 +30,7 @@ import storage
 from processing import load_image, RAW_EXTENSIONS
 from auto_rotate import detect_auto_rotation, RotationConfidence
 from state import TransformState
+from ui_constants import Colors, Styles, get_accent_button_style
 
 # Import all widgets from the refactored widgets package
 from widgets import (
@@ -111,6 +112,7 @@ class ShortcutsOverlay(QWidget):
             # Presets
             [
                 (["`"], "Presets"),
+                (["g"], "Grid view"),
                 (["1-9"], "Apply preset"),
                 (["⌘↑"], "Move up"),
                 (["⌘↓"], "Move down"),
@@ -419,6 +421,13 @@ class NegativeDetectorGUI(QMainWindow):
                 self.adjustments_view._adjustments_panel.toggle()
             else:  # Detection view
                 self._controls_panel.toggle()
+            event.accept()
+            return
+
+        # G to toggle preset grid view (Development view only)
+        if event.key() == Qt.Key_G and not event.modifiers():
+            if self.view_stack.currentIndex() == 1:  # Development view
+                self.adjustments_view.toggle_preset_grid()
             event.accept()
             return
 
@@ -1670,7 +1679,7 @@ class NegativeDetectorGUI(QMainWindow):
     def _update_rotation_reset_button_styles(self):
         """Highlight rotation reset button when rotation is non-zero."""
         if self.current_rotation != 0:
-            style = "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }"
+            style = get_accent_button_style()
         else:
             style = ""
         # Update transform widget reset button (Detection view only now)
