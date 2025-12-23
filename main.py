@@ -235,6 +235,7 @@ class NegativeDetectorGUI(QMainWindow):
         self._processing_service = ProcessingService(self)
         self._hash_service = HashService(self)
         self._hash_service.hashComputed.connect(self._on_hash_computed)
+        self._hash_service.allCompleted.connect(self._on_all_hashes_completed)
 
         # Shared transform state between Detection and Development views
         self._transform_state = TransformState()
@@ -1095,23 +1096,20 @@ class NegativeDetectorGUI(QMainWindow):
         if paths:
             self.file_list = sorted(paths)
             self.file_index = 0
-            self._compute_file_hashes()
-            hashes = [self._file_hashes.get(p) for p in self.file_list]
-            self.thumbnail_bar.set_files(self.file_list, hashes)
+            # Set files with no hashes initially - they'll be computed in background
+            self.thumbnail_bar.set_files(self.file_list, [None] * len(self.file_list))
             self._load_current_file()
-            # Start background auto-processing for all images
-            self._start_batch_auto_process()
+            # Start background hashing - auto-processing will start when hashes complete
+            self._hash_service.compute_hashes_async(self.file_list)
 
     def _load_image_from_path(self, path: str):
         """Load a single image (adds to file list if not already there)."""
         if path not in self.file_list:
             self.file_list = [path]
             self.file_index = 0
-            self._compute_file_hashes()
-            hashes = [self._file_hashes.get(p) for p in self.file_list]
-            self.thumbnail_bar.set_files(self.file_list, hashes)
-            # Start background auto-processing
-            self._start_batch_auto_process()
+            self.thumbnail_bar.set_files(self.file_list, [None])
+            # Start background hashing
+            self._hash_service.compute_hashes_async(self.file_list)
         self._load_current_file()
 
     def set_file_list(self, paths: list):
@@ -1120,18 +1118,11 @@ class NegativeDetectorGUI(QMainWindow):
         if valid_paths:
             self.file_list = valid_paths
             self.file_index = 0
-            self._compute_file_hashes()
-            hashes = [self._file_hashes.get(p) for p in self.file_list]
-            self.thumbnail_bar.set_files(valid_paths, hashes)
+            # Set files with no hashes initially
+            self.thumbnail_bar.set_files(valid_paths, [None] * len(valid_paths))
             self._load_current_file()
-            # Start background auto-processing for all images
-            self._start_batch_auto_process()
-
-    def _compute_file_hashes(self):
-        """Compute and cache hashes for all files in file_list."""
-        for path in self.file_list:
-            if path not in self._file_hashes:
-                self._file_hashes[path] = self._compute_image_hash(path)
+            # Start background hashing - auto-processing will start when hashes complete
+            self._hash_service.compute_hashes_async(valid_paths)
 
     def _load_current_file(self):
         """Load the current file from the file list."""
@@ -1220,6 +1211,16 @@ class NegativeDetectorGUI(QMainWindow):
         if path in self.file_list:
             index = self.file_list.index(path)
             self.thumbnail_bar.update_hash(index, file_hash)
+        # Update current image hash if this is the current file
+        if path == self.current_path:
+            self._current_hash = file_hash
+
+    def _on_all_hashes_completed(self, results: dict):
+        """Handle completion of background hash computation."""
+        # Update file hashes cache with all results
+        self._file_hashes.update(results)
+        # Start batch auto-processing now that we have all hashes
+        self._start_batch_auto_process()
 
     def _save_current_settings(self):
         """Save settings and thumbnail for current image to SQLite."""
